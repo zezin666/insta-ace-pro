@@ -111,25 +111,29 @@ v1 需要的命令：
 
 `MediaType` 枚举：`VIDEO=0, PHOTO=1, VIDEO_AND_PHOTO=2, DNG=3, MP4=4, JPG=5, INS_DATA=6`。
 
-文件列表 limit 上限需真机确认（GO Ultra 为 100/页）；按 `total_count` 翻页。
+文件列表 limit 实测上限 100/页；Ace Pro 1（固件 `v1.1.0_build1`）实测 `total_count=356`、4 页拉完、计数准确，按 `total_count` 翻页即可。
 
 ### 5.3 文件传输（HTTP 80）
 
-- `GET http://192.168.42.1<uri>` 获取文件，无需会话鉴权。
+- `GET http://192.168.42.1<uri>` 获取文件，无需会话鉴权。实测 `HEAD` 返回 200 + `Content-Length`，`Range` 返回 206 + `Content-Range`。
+- 注意：`GET /DCIM/` 实测返回 **403**（无目录列表），`/osc/*` 返回 **400**；文件列表只能走 TCP 命令 13。
 - 支持 `Range`（206），用于断点续传和视频拖拽；`HEAD` 取大小。
 - 下载与播放都绑定相机网络。
 - 若 `uri` 是完整 URL，取其 path 再拼默认 host。
 
 ### 5.4 缩略图
 
-采用逐级回退，真机探测后确定主路径：
+采用逐级回退，主路径已由真机探测确定：
 
-1. TCP `GET_FILE_EXTRA(extra_type=2)` 返回原始缩略图（GO Ultra 为 NV12；Ace Pro 格式待验证）。
-2. HTTP 获取卡内 `THM_*.thm`（若文件列表包含）。
-3. 照片：HTTP Range 取文件头 ~64KB，用 `ExifInterface` 取内嵌缩略图。
-4. 视频：缓存 `.lrv` 低清代理，用 `MediaMetadataRetriever` 抽帧；失败则显示占位图。
+1. **TCP `GET_FILE_EXTRA(extra_type=2)` 返回 raw NV12 缩略图**（实测）。响应体前 36 字节为 9 个小端 u32：
+   `[1][total][1][0][width][height][0][0][0]`，随后是 NV12（Y 平面 `w*h`，再是交错 UV `w*h/2`），末尾多出的 4 字节忽略。
+   实测照片 704×544、574,504 字节；视频 896×512、688,168 字节。
+2. `extra_type=1` 返回的是 protobuf 文件元数据（序列号/型号/固件），不是图片，v1 不使用。
+3. `extra_type=3` 返回另一种二进制格式（非 JPEG），v1 不使用。
+4. 照片兜底：HTTP Range 取文件头 ~64KB，用 `ExifInterface` 取内嵌缩略图。
+5. 视频兜底：缓存 `.lrv` 低清代理，用 `MediaMetadataRetriever` 抽帧；失败则显示占位图。
 
-缩略图存内存 LRU（按 uri 键），磁盘缓存放在 App cache 目录，避免重复走 WiFi。
+协议缩略图不是 JPEG，必须实现 NV12 → ARGB 转换。缩略图存内存 LRU（按 uri 键），磁盘缓存放在 App cache 目录，避免重复走 WiFi。
 
 ### 5.5 数据模型
 
@@ -145,7 +149,7 @@ data class CameraFile(
 )
 ```
 
-- 文件名解析：`^(VID|IMG|LRV|THM|PRO_VID|PRO_IMG|LIV)_(\d{8})_(\d{6})(?:_(\d{2}))?_(\d{3})`（Ace Pro 1 代待验证）。
+- 文件名解析：`^(VID|IMG|LRV|THM|PRO_VID|PRO_IMG|LIV)_(\d{8})_(\d{6})(?:_(\d{2}))?_(\d{3})`（实测样本均匹配，路径形如 `/DCIM/Camera01/IMG_20260726_192311_149.jpg`）。
 - 过滤掉 `.lrv`、`.thm`、隐藏文件。
 - `.dng`：列表和查看器展示其内嵌 JPEG 预览（Coil 不能直接解码 DNG），下载时保存原始 `.dng`。
 - `.insv/.insp` 等无法直接解码的格式：列表显示通用占位缩略图，查看器显示"仅支持下载"，下载时原样保存。Ace Pro 1 代是否产生这类文件以阶段 0 探测为准。

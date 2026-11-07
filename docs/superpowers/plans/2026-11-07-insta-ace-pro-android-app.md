@@ -1035,7 +1035,7 @@ Expected: FAIL。
 - [ ] **Step 3: 实现**
 
 - `Nv12Decoder.decode`：Y 平面 `w*h`，UV 平面交错 `U,V`；BT.601 全范围转 RGB，alpha 0xFF，返回 `Thumbnail(w, h, argb)`。
-- `ProtocolThumbnailSource`：按 Task 0 报告的格式解析响应（若为 GO Ultra 式头：9 个 u32 后有 width/height，随后 NV12；若报告为 JPEG，则直接 `BitmapFactory.decodeByteArray`）。用 `CameraTransport.request(11, GetFileExtra(uri, extra_type=2))`。
+- `ProtocolThumbnailSource`：`CameraTransport.request(11, GetFileExtra(uri, extra_type=2))`。响应体前 36 字节是 9 个小端 u32：`[1][total][1][0][width][height][0][0][0]`；NV12 从 offset 36 开始，长度 `width*height*3/2`；末尾多出的 4 字节忽略。宽度 = offset 16 的 u32，高度 = offset 20 的 u32。校验长度后调用 `Nv12Decoder.decode(body.copyOfRange(36, 36 + w*h*3/2), w, h)`。实测照片 704×544、视频 896×512。
 - `HttpThumbnailSource`：`readRange(path, 0, 65536)` 后 `BitmapFactory.decodeByteArray`；用于卡内 `THM_` 文件或服务端缩略图可用的情况。
 - `ExifThumbnailSource`：`readRange(path, 0, 65536)`，用 `ExifInterface` 从字节流取缩略图；JPG 与 DNG 都先走这里（AndroidX ExifInterface 可读 DNG 的内嵌预览）；把解码后的 Bitmap 转成 `Thumbnail`（`getPixels`），失败返回 null，UI 显示占位图。此 source 依赖 Android，不做 JVM 单测，由真机验证。
 - `ThumbnailLoader`：每个 source 内部捕获异常并返回 null；先查内存、再查磁盘，未命中按顺序尝试 sources，成功后写入磁盘与内存。
