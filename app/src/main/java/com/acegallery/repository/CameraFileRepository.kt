@@ -47,9 +47,6 @@ class CameraFileRepository(
             }
 
             start += response.uriCount
-            if (response.totalCount > 0 && files.size >= response.totalCount) {
-                return@withContext files.values.toList()
-            }
         }
         files.values.toList()
     }

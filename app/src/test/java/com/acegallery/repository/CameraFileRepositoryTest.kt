@@ -46,11 +46,29 @@ class CameraFileRepositoryTest {
     }
 
     @Test
-    fun `stops when total is reached`() = runTest {
-        val transport = FakeTransport(listOf(resp(listOf("/DCIM/a.mp4"), total = 1)))
+    fun `stops after the empty page`() = runTest {
+        val transport = FakeTransport(
+            listOf(
+                resp(listOf("/DCIM/a.mp4"), total = 1),
+                resp(emptyList(), total = 1),
+            ),
+        )
         val files = CameraFileRepository(transport, pageSize = 1).listFiles()
         assertEquals(1, files.size)
-        assertEquals(1, transport.calls)
+        assertEquals(2, transport.calls)
+    }
+
+    @Test
+    fun `does not truncate when total underestimates`() = runTest {
+        val transport = FakeTransport(
+            listOf(
+                resp(listOf("/DCIM/a.mp4", "/DCIM/b.jpg"), total = 1),
+                resp(listOf("/DCIM/c.mp4"), total = 1),
+                resp(emptyList(), total = 1),
+            ),
+        )
+        val files = CameraFileRepository(transport, pageSize = 2).listFiles()
+        assertEquals(3, files.size)
     }
 
     private class FakeTransport(

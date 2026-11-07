@@ -5,10 +5,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.acegallery.download.DownloadService
 import com.acegallery.model.CameraFile
 import com.acegallery.ui.diagnostics.DiagnosticsScreen
 import com.acegallery.ui.gallery.GalleryScreen
@@ -34,10 +36,16 @@ fun AceGalleryNav() {
         composable("viewer/{index}") { entry ->
             val index = entry.arguments?.getString("index")?.toIntOrNull() ?: 0
             val viewModel: ViewerViewModel = hiltViewModel()
+            val context = LocalContext.current
             ViewerScreen(
                 files = viewerFiles,
                 initialIndex = index,
                 session = viewModel.session,
+                thumbnailLoader = viewModel.thumbnailLoader,
+                onDownload = { file ->
+                    viewModel.download(file)
+                    DownloadService.start(context)
+                },
                 onBack = { navController.popBackStack() },
             )
         }

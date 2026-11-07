@@ -5,7 +5,10 @@ import java.io.DataOutputStream
 import java.io.File
 import java.security.MessageDigest
 
-class ThumbnailDiskCache(private val dir: File) {
+class ThumbnailDiskCache(
+    private val dir: File,
+    private val maxBytes: Long = 128L * 1024 * 1024,
+) {
 
     fun get(key: String): Thumbnail? = runCatching {
         val file = fileFor(key)
@@ -27,6 +30,17 @@ class ThumbnailDiskCache(private val dir: File) {
                 output.writeInt(thumb.height)
                 thumb.argb.forEach { output.writeInt(it) }
             }
+            trim()
+        }
+    }
+
+    private fun trim() {
+        val files = dir.listFiles()?.sortedBy { it.lastModified() } ?: return
+        var total = files.sumOf { it.length() }
+        for (file in files) {
+            if (total <= maxBytes) break
+            total -= file.length()
+            file.delete()
         }
     }
 

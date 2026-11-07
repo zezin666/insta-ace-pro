@@ -5,9 +5,11 @@ import java.nio.file.Files
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -77,5 +79,34 @@ class HttpCameraFileSourceTest {
         source.download("/DCIM/big.mp4", dest, offset = 5_000_000_000L)
 
         assertEquals("bytes=5000000000-", server.takeRequest().getHeader("Range"))
+    }
+
+    @Test
+    fun `read range on 200 reads only requested bytes`() {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("0123456789"))
+        assertArrayEquals("0123".toByteArray(), source.readRange("/DCIM/a.jpg", 0, 4))
+    }
+
+    @Test
+    fun `416 with complete temp means done`() {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(416)
+                .addHeader("Content-Range", "bytes */100"),
+        )
+        val dest = File(tempDir, "a.part").apply { writeBytes(ByteArray(100)) }
+
+        assertEquals(100L, source.download("/DCIM/a.mp4", dest, offset = 100))
+    }
+
+    @Test
+    fun `progress is throttled`() {
+        val body = ByteArray(2 * 1024 * 1024)
+        server.enqueue(MockResponse().setResponseCode(200).setBody(Buffer().write(body)))
+        var calls = 0
+
+        source.download("/DCIM/big.mp4", File(tempDir, "big.part"), offset = 0) { calls++ }
+
+        assertTrue("progress calls=$calls", calls <= 8)
     }
 }

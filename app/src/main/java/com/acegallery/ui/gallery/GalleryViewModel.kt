@@ -7,6 +7,7 @@ import com.acegallery.download.DownloadQueue
 import com.acegallery.model.CameraFile
 import com.acegallery.session.CameraGateway
 import com.acegallery.session.CameraState
+import com.acegallery.settings.CameraHostProvider
 import com.acegallery.thumbnail.ThumbnailLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -33,6 +34,7 @@ class GalleryViewModel @Inject constructor(
     private val session: CameraGateway,
     private val downloadManager: DownloadQueue,
     private val thumbnailLoader: ThumbnailLoader,
+    private val cameraHostProvider: CameraHostProvider,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GalleryUiState())
@@ -61,7 +63,7 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
-                session.connect()
+                session.connect(cameraHostProvider.host())
                 val files = session.listFiles()
                 _state.value = _state.value.copy(
                     connection = session.state.value,

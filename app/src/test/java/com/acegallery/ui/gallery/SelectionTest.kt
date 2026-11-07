@@ -10,6 +10,7 @@ import com.acegallery.network.CameraFileSource
 import com.acegallery.repository.CameraFileRepository
 import com.acegallery.session.CameraGateway
 import com.acegallery.session.CameraState
+import com.acegallery.settings.CameraHostProvider
 import com.acegallery.thumbnail.ThumbnailLoader
 import java.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +69,7 @@ class SelectionTest {
         session = FakeSession(files),
         downloadManager = queue,
         thumbnailLoader = ThumbnailLoader(emptyList()),
+        cameraHostProvider = CameraHostProvider { "192.168.42.1" },
     )
 
     private class FakeSession(private val files: List<CameraFile>) : CameraGateway {

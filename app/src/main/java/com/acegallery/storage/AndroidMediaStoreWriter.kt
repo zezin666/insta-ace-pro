@@ -51,6 +51,7 @@ class AndroidMediaStoreWriter(private val context: Context) : MediaStoreWriter {
         val selection = buildString {
             append("${MediaStore.MediaColumns.DISPLAY_NAME}=?")
             append(" AND ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?")
+            append(" AND ${MediaStore.MediaColumns.IS_PENDING}=0")
             if (file.sizeBytes != null) append(" AND ${MediaStore.MediaColumns.SIZE}=?")
         }
         val arguments = buildList {

@@ -3,6 +3,7 @@ package com.acegallery.camera
 import com.acegallery.proto.CameraProto
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -47,6 +48,7 @@ class CameraProtocolClientTest {
                 assertThrows(CameraProtocolTimeoutException::class.java) {
                     client.request(CameraCommands.GET_FILE_LIST, ByteArray(0), timeoutMs = 200)
                 }
+                assertFalse(client.isAlive())
             } finally {
                 client.close()
             }

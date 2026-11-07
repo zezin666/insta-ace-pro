@@ -109,6 +109,18 @@ class DownloadManagerTest {
     }
 
     @Test
+    fun `resumes after a partial write and failure`() = runTest {
+        val source = PartialFailSource()
+        val manager = manager(FakeProvider(source), FakeWriter(), plenty)
+
+        manager.enqueue(listOf(fileA))
+        advanceUntilIdle()
+
+        assertEquals(10L, source.secondOffset)
+        assertEquals(DownloadManager.State.Done, manager.items.value.single().state)
+    }
+
+    @Test
     fun `insufficient space fails without downloading`() = runTest {
         val source = FakeFileSource()
         val manager = manager(FakeProvider(source), FakeWriter(), FreeSpaceChecker { 10 })
@@ -175,11 +187,38 @@ class DownloadManagerTest {
         override fun readRange(path: String, offset: Long, length: Int): ByteArray = ByteArray(0)
     }
 
+    private class PartialFailSource : CameraFileSource {
+        var attempts = 0
+            private set
+        var secondOffset = -1L
+            private set
+
+        override fun size(path: String): Long? = 20
+
+        override fun download(
+            path: String,
+            dest: File,
+            offset: Long,
+            onProgress: (Long) -> Unit,
+        ): Long {
+            attempts++
+            if (attempts == 1) {
+                dest.writeBytes(ByteArray(10))
+                throw IOException("drop")
+            }
+            secondOffset = offset
+            dest.writeBytes(ByteArray(10))
+            onProgress(20)
+            return 20
+        }
+
+        override fun readRange(path: String, offset: Long, length: Int): ByteArray = ByteArray(0)
+    }
+
     private class FakeWriter(
         private val existing: Boolean = false,
         private val failOnCopy: Boolean = false,
-    ) : MediaStoreWriter {
-        val deleted = mutableListOf<PendingMedia>()
+    ) : MediaStoreWriter {        val deleted = mutableListOf<PendingMedia>()
         private var nextId = 1L
 
         override fun createPending(file: CameraFile): PendingMedia =

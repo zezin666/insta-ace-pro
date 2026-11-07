@@ -44,7 +44,9 @@ class DiagnosticsViewModel @Inject constructor(
                 out += DiagnosticResult("文件列表（命令 13）", "${files.size} 个文件")
                 val first = files.firstOrNull()
                 if (first != null) {
-                    val size = runCatching { session.get().size(first.path) }.getOrNull()
+                    val size = runCatching {
+                        withContext(Dispatchers.IO) { session.get().size(first.path) }
+                    }.getOrNull()
                     out += DiagnosticResult("HTTP HEAD", size?.toString() ?: "失败")
 
                     val thumb = runCatching {

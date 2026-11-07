@@ -9,6 +9,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -54,6 +55,38 @@ class ThumbnailLoaderTest {
         assertArrayEquals(intArrayOf(1, 2, 3, 4), loaded?.argb)
     }
 
+    @Test
+    fun `loader downscales large thumbnail`() = runTest {
+        val big = Thumbnail(512, 512, IntArray(512 * 512))
+        val loader = ThumbnailLoader(listOf(FakeSource(big)))
+
+        val result = loader.load(file)
+
+        assertTrue(result!!.width <= 256)
+        assertTrue(result.height <= 256)
+    }
+
+    @Test
+    fun `loader evicts over byte budget`() = runTest {
+        val source = PerFileSource()
+        val loader = ThumbnailLoader(listOf(source), maxBytes = 4)
+
+        loader.load(file)
+        loader.load(fileB)
+        loader.load(file)
+
+        assertEquals(3, source.calls)
+    }
+
+    @Test
+    fun `disk cache evicts oldest`() {
+        val cache = ThumbnailDiskCache(tempDir, maxBytes = 40)
+        cache.put("a", Thumbnail(2, 2, intArrayOf(1, 2, 3, 4)))
+        cache.put("b", Thumbnail(2, 2, intArrayOf(5, 6, 7, 8)))
+
+        assertTrue((tempDir.listFiles()?.size ?: 0) <= 1)
+    }
+
     private class FakeSource(private val thumb: Thumbnail?) : ThumbnailSource {
         override suspend fun load(file: CameraFile): Thumbnail? = thumb
     }
@@ -68,6 +101,16 @@ class ThumbnailLoaderTest {
         }
     }
 
+    private class PerFileSource : ThumbnailSource {
+        var calls = 0
+            private set
+
+        override suspend fun load(file: CameraFile): Thumbnail? {
+            calls++
+            return Thumbnail(1, 1, intArrayOf(file.name.length))
+        }
+    }
+
     private companion object {
         val file = CameraFile(
             uri = "/DCIM/a.jpg",
@@ -75,5 +118,6 @@ class ThumbnailLoaderTest {
             name = "a.jpg",
             kind = CameraFileKind.PHOTO,
         )
+        val fileB = file.copy(path = "/DCIM/b.jpg", name = "b.jpg")
     }
 }

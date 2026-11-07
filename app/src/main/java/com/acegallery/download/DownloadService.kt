@@ -42,6 +42,7 @@ class DownloadService : Service() {
         startForeground(NOTIFICATION_ID, notification(done = 0, total = 0))
         job?.cancel()
         job = scope.launch {
+            var lastNotifiedAt = 0L
             queue.items.collectLatest { items ->
                 val active = items.count {
                     it.state is DownloadManager.State.Queued ||
@@ -52,8 +53,12 @@ class DownloadService : Service() {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 } else {
-                    getSystemService(NotificationManager::class.java)
-                        .notify(NOTIFICATION_ID, notification(done = done, total = items.size))
+                    val now = System.currentTimeMillis()
+                    if (now - lastNotifiedAt >= 500) {
+                        lastNotifiedAt = now
+                        getSystemService(NotificationManager::class.java)
+                            .notify(NOTIFICATION_ID, notification(done = done, total = items.size))
+                    }
                 }
             }
         }

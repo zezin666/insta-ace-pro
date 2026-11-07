@@ -16,6 +16,24 @@ data class Thumbnail(
     val argb: IntArray,
 )
 
+fun Thumbnail.byteSize(): Long = width.toLong() * height * 4
+
+fun Thumbnail.scaledTo(maxDimension: Int): Thumbnail {
+    val scale = maxDimension.toFloat() / maxOf(width, height)
+    if (scale >= 1f) return this
+    val newWidth = (width * scale).toInt().coerceAtLeast(1)
+    val newHeight = (height * scale).toInt().coerceAtLeast(1)
+    val pixels = IntArray(newWidth * newHeight)
+    for (y in 0 until newHeight) {
+        val sourceY = (y / scale).toInt().coerceIn(0, height - 1)
+        for (x in 0 until newWidth) {
+            val sourceX = (x / scale).toInt().coerceIn(0, width - 1)
+            pixels[y * newWidth + x] = argb[sourceY * width + sourceX]
+        }
+    }
+    return Thumbnail(newWidth, newHeight, pixels)
+}
+
 interface ThumbnailSource {
     suspend fun load(file: CameraFile): Thumbnail?
 }

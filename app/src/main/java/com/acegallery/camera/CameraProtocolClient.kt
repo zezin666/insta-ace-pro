@@ -41,7 +41,12 @@ class CameraProtocolClient(
             while (isActive && alive.get()) {
                 delay(keepAliveMs)
                 if (!alive.get()) break
-                runCatching { send(KEEPALIVE) }
+                try {
+                    send(KEEPALIVE)
+                } catch (_: IOException) {
+                    markDead()
+                    break
+                }
             }
         }
     }
@@ -54,11 +59,17 @@ class CameraProtocolClient(
         val deferred = CompletableDeferred<ByteArray>()
         pending[sequence] = deferred
         try {
-            send(MessageCodec.encodeHeader(command, sequence) + payload)
+            try {
+                send(MessageCodec.encodeHeader(command, sequence) + payload)
+            } catch (io: IOException) {
+                markDead()
+                throw io
+            }
             return runBlocking {
                 withTimeout(timeoutMs) { deferred.await() }
             }
         } catch (timeout: TimeoutCancellationException) {
+            markDead()
             throw CameraProtocolTimeoutException("no response to command $command")
         } finally {
             pending.remove(sequence)
@@ -111,6 +122,11 @@ class CameraProtocolClient(
         keepAliveJob?.cancel()
         runCatching { socket.close() }
         failAll(IOException("camera connection closed"))
+    }
+
+    private fun markDead() {
+        alive.set(false)
+        runCatching { socket.close() }
     }
 
     private companion object {

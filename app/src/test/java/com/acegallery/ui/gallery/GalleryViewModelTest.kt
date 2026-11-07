@@ -10,6 +10,7 @@ import com.acegallery.network.CameraFileSource
 import com.acegallery.repository.CameraFileRepository
 import com.acegallery.session.CameraGateway
 import com.acegallery.session.CameraState
+import com.acegallery.settings.CameraHostProvider
 import com.acegallery.thumbnail.ThumbnailLoader
 import java.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +55,20 @@ class GalleryViewModelTest {
         )
     }
 
+    @Test
+    fun `refresh connects to configured host`() = runTest {
+        val session = FakeSession(emptyList(), null)
+        val viewModel = GalleryViewModel(
+            session = session,
+            downloadManager = FakeDownloadQueue(),
+            thumbnailLoader = ThumbnailLoader(emptyList()),
+            cameraHostProvider = CameraHostProvider { "10.0.0.1" },
+        )
+        viewModel.refresh()
+        mainDispatcherRule.dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("10.0.0.1", session.lastHost)
+    }
+
     private fun viewModel(
         files: List<CameraFile> = emptyList(),
         error: String? = null,
@@ -61,6 +76,7 @@ class GalleryViewModelTest {
         session = FakeSession(files, error),
         downloadManager = FakeDownloadQueue(),
         thumbnailLoader = ThumbnailLoader(emptyList()),
+        cameraHostProvider = CameraHostProvider { "192.168.42.1" },
     )
 
     private class FakeSession(
@@ -69,8 +85,11 @@ class GalleryViewModelTest {
     ) : CameraGateway {
         private val _state = MutableStateFlow<CameraState>(CameraState.Disconnected)
         override val state: StateFlow<CameraState> = _state
+        var lastHost: String? = null
+            private set
 
         override suspend fun connect(host: String) {
+            lastHost = host
             _state.value = CameraState.Connected(host)
         }
 
