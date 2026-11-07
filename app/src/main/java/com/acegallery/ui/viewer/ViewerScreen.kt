@@ -16,8 +16,11 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -99,7 +102,7 @@ fun ViewerScreen(
 
     val context = LocalContext.current
     val view = LocalView.current
-    var chromeVisible by remember { mutableStateOf(true) }
+    val chromeVisible = true
 
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
@@ -117,10 +120,9 @@ fun ViewerScreen(
     ) { files.size }
     val current = files[pagerState.currentPage]
     var currentSize by remember(current.path) { mutableStateOf(current.sizeBytes) }
-    var shareable by remember(current.path) { mutableStateOf<File?>(null) }
+    var readyFiles by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
 
     LaunchedEffect(current.path) {
-        shareable = null
         if (currentSize == null) {
             currentSize = runCatching {
                 withContext(Dispatchers.IO) { session.get().size(current.path) }
@@ -154,9 +156,8 @@ fun ViewerScreen(
                             file = file,
                             session = session,
                             onFileReady = { ready ->
-                                if (page == pagerState.currentPage) shareable = ready
+                                readyFiles = readyFiles + (file.path to ready)
                             },
-                            onTap = { chromeVisible = !chromeVisible },
                         )
 
                     file.kind == CameraFileKind.PHOTO && isDng(file) ->
@@ -201,7 +202,7 @@ fun ViewerScreen(
             BottomChrome(
                 file = current,
                 sizeBytes = currentSize,
-                onShare = shareable?.let { file -> { share(context, file) } },
+                onShare = readyFiles[current.path]?.let { file -> { share(context, file) } },
             )
         }
     }
@@ -310,7 +311,6 @@ private fun PhotoPage(
     file: CameraFile,
     session: CameraGateway,
     onFileReady: (File) -> Unit,
-    onTap: () -> Unit,
 ) {
     val context = LocalContext.current
     val cache = remember { PhotoCache(session, context.cacheDir) }
@@ -337,12 +337,12 @@ private fun PhotoPage(
             }
         }
     } else {
-        ZoomableImage(file = path, onTap = onTap)
+        ZoomableImage(file = path)
     }
 }
 
 @Composable
-private fun ZoomableImage(file: File, onTap: () -> Unit) {
+private fun ZoomableImage(file: File) {
     var targetScale by remember { mutableFloatStateOf(1f) }
     var targetOffset by remember { mutableStateOf(Offset.Zero) }
     val scale by animateFloatAsState(
@@ -360,25 +360,39 @@ private fun ZoomableImage(file: File, onTap: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    targetScale = (targetScale * zoom).coerceIn(1f, 5f)
-                    targetOffset += pan
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed >= 2) {
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+                            targetScale = (targetScale * zoom).coerceIn(1f, 5f)
+                            targetOffset += pan
+                            event.changes.forEach { it.consume() }
+                        } else if (targetScale > 1.01f && pressed == 1) {
+                            targetOffset += event.calculatePan()
+                            event.changes.forEach { it.consume() }
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    }
                 }
             }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = {
-                        if (targetScale > 1.01f) {
-                            targetScale = 1f
-                            targetOffset = Offset.Zero
-                        } else {
-                            targetScale = 2.5f
-                            targetOffset = Offset.Zero
-                        }
-                    },
-                )
-            },
+            .then(
+                if (targetScale > 1.01f) {
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                targetScale = 1f
+                                targetOffset = Offset.Zero
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         AsyncImage(
