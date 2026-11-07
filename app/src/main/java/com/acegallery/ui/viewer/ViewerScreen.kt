@@ -1,8 +1,19 @@
 package com.acegallery.ui.viewer
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -10,17 +21,31 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -30,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -37,8 +63,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import coil3.compose.AsyncImage
 import com.acegallery.model.CameraFile
 import com.acegallery.model.CameraFileKind
@@ -46,6 +77,7 @@ import com.acegallery.session.CameraGateway
 import com.acegallery.thumbnail.Thumbnail
 import com.acegallery.thumbnail.ThumbnailLoader
 import java.io.File
+import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -60,9 +92,24 @@ fun ViewerScreen(
 ) {
     if (files.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("没有可查看的文件")
+            Text("没有可查看的文件", color = Color.White)
         }
         return
+    }
+
+    val context = LocalContext.current
+    val view = LocalView.current
+    var chromeVisible by remember { mutableStateOf(true) }
+
+    DisposableEffect(Unit) {
+        val window = context.findActivity()?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        controller?.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     val pagerState = rememberPagerState(
@@ -70,8 +117,10 @@ fun ViewerScreen(
     ) { files.size }
     val current = files[pagerState.currentPage]
     var currentSize by remember(current.path) { mutableStateOf(current.sizeBytes) }
+    var shareable by remember(current.path) { mutableStateOf<File?>(null) }
 
     LaunchedEffect(current.path) {
+        shareable = null
         if (currentSize == null) {
             currentSize = runCatching {
                 withContext(Dispatchers.IO) { session.get().size(current.path) }
@@ -79,54 +128,190 @@ fun ViewerScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("返回", color = Color.White) }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = current.name,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = detailText(current, currentSize),
-                    color = Color.LightGray,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            TextButton(onClick = { onDownload(current) }) {
-                Text("下载", color = Color.White)
-            }
-        }
-
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
+            pageSpacing = 12.dp,
         ) { page ->
             val file = files[page]
-            when {
-                file.kind == CameraFileKind.PHOTO && isViewablePhoto(file) ->
-                    PhotoPage(file = file, session = session)
+            val offset = (
+                (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                ).absoluteValue
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = 1f - (offset * 0.06f).coerceIn(0f, 0.06f)
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = 1f - (offset * 0.35f).coerceIn(0f, 0.35f)
+                    },
+            ) {
+                when {
+                    file.kind == CameraFileKind.PHOTO && isViewablePhoto(file) ->
+                        PhotoPage(
+                            file = file,
+                            session = session,
+                            onFileReady = { ready ->
+                                if (page == pagerState.currentPage) shareable = ready
+                            },
+                            onTap = { chromeVisible = !chromeVisible },
+                        )
 
-                file.kind == CameraFileKind.PHOTO && isDng(file) ->
-                    PreviewPage(file = file, loader = thumbnailLoader)
+                    file.kind == CameraFileKind.PHOTO && isDng(file) ->
+                        PreviewPage(file = file, loader = thumbnailLoader)
 
-                file.kind == CameraFileKind.VIDEO && isViewableVideo(file) ->
-                    VideoPlayer(file = file, session = session, modifier = Modifier.fillMaxSize())
+                    file.kind == CameraFileKind.VIDEO && isViewableVideo(file) ->
+                        VideoPlayer(
+                            file = file,
+                            session = session,
+                            modifier = Modifier.fillMaxSize(),
+                        )
 
-                else -> UnsupportedPage(file = file, onDownload = { onDownload(file) })
+                    else -> UnsupportedPage(
+                        file = file,
+                        onDownload = { onDownload(file) },
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = chromeVisible,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            TopChrome(
+                file = current,
+                page = pagerState.currentPage + 1,
+                total = files.size,
+                onBack = onBack,
+                onDownload = { onDownload(current) },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = chromeVisible && current.kind == CameraFileKind.PHOTO,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            BottomChrome(
+                file = current,
+                sizeBytes = currentSize,
+                onShare = shareable?.let { file -> { share(context, file) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TopChrome(
+    file: CameraFile,
+    page: Int,
+    total: Int,
+    onBack: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Black.copy(alpha = 0.82f), Color.Transparent),
+                ),
+            )
+            .statusBarsPadding()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = file.name,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "$page / $total",
+                    color = Color.White.copy(alpha = 0.65f),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            IconButton(onClick = onDownload) {
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "下载",
+                    tint = Color.White,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PhotoPage(file: CameraFile, session: CameraGateway) {
+private fun BottomChrome(
+    file: CameraFile,
+    sizeBytes: Long?,
+    onShare: (() -> Unit)?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f)),
+                ),
+            )
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+    ) {
+        Column {
+            Text(
+                text = file.name,
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = detailText(file, sizeBytes),
+                color = Color.White.copy(alpha = 0.65f),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            if (onShare != null) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onShare,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                ) {
+                    Icon(
+                        Icons.Filled.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("分享")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoPage(
+    file: CameraFile,
+    session: CameraGateway,
+    onFileReady: (File) -> Unit,
+    onTap: () -> Unit,
+) {
     val context = LocalContext.current
     val cache = remember { PhotoCache(session, context.cacheDir) }
     var localFile by remember(file.path) { mutableStateOf<File?>(null) }
@@ -134,7 +319,10 @@ private fun PhotoPage(file: CameraFile, session: CameraGateway) {
 
     LaunchedEffect(file.path) {
         runCatching { cache.get(file) }
-            .onSuccess { localFile = it }
+            .onSuccess {
+                localFile = it
+                onFileReady(it)
+            }
             .onFailure { error = it.message ?: "加载失败" }
     }
 
@@ -149,39 +337,45 @@ private fun PhotoPage(file: CameraFile, session: CameraGateway) {
             }
         }
     } else {
-        Box(Modifier.fillMaxSize()) {
-            ZoomableImage(path)
-            TextButton(
-                onClick = { share(context, path) },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp),
-            ) {
-                Text("分享", color = Color.White)
-            }
-        }
+        ZoomableImage(file = path, onTap = onTap)
     }
 }
 
 @Composable
-private fun ZoomableImage(file: File) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+private fun ZoomableImage(file: File, onTap: () -> Unit) {
+    var targetScale by remember { mutableFloatStateOf(1f) }
+    var targetOffset by remember { mutableStateOf(Offset.Zero) }
+    val scale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 1200f),
+        label = "photoScale",
+    )
+    val offset by animateOffsetAsState(
+        targetValue = targetOffset,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 1200f),
+        label = "photoOffset",
+    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
-                    offset += pan
+                    targetScale = (targetScale * zoom).coerceIn(1f, 5f)
+                    targetOffset += pan
                 }
             }
             .pointerInput(Unit) {
                 detectTapGestures(
+                    onTap = { onTap() },
                     onDoubleTap = {
-                        scale = 1f
-                        offset = Offset.Zero
+                        if (targetScale > 1.01f) {
+                            targetScale = 1f
+                            targetOffset = Offset.Zero
+                        } else {
+                            targetScale = 2.5f
+                            targetOffset = Offset.Zero
+                        }
                     },
                 )
             },
@@ -226,11 +420,11 @@ private fun PreviewPage(file: CameraFile, loader: ThumbnailLoader) {
             CircularProgressIndicator()
         }
         Text(
-            "DNG 预览（原图请下载）",
+            text = "DNG 预览（原图请下载）",
             color = Color.White,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(16.dp),
+                .padding(24.dp),
         )
     }
 }
@@ -239,24 +433,41 @@ private fun PreviewPage(file: CameraFile, loader: ThumbnailLoader) {
 private fun UnsupportedPage(file: CameraFile, onDownload: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("该格式仅支持下载", color = Color.White)
-            Text(file.name, color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-            Button(onClick = onDownload) { Text("下载") }
+            Text(
+                text = "该格式仅支持下载",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = file.name,
+                color = Color.White.copy(alpha = 0.65f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(16.dp))
+            FilledTonalButton(onClick = onDownload) {
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("下载")
+            }
         }
     }
 }
 
 private fun detailText(file: CameraFile, sizeBytes: Long?): String = buildString {
-    append(file.name)
     file.capturedAt?.let {
-        append(" · ")
         append(it)
     }
     sizeBytes?.let {
-        append(" · ")
+        if (isNotEmpty()) append(" · ")
         append(it)
         append(" B")
     }
+    if (isEmpty()) append(file.name)
 }
 
 private fun isViewablePhoto(file: CameraFile): Boolean =
@@ -270,6 +481,12 @@ private fun isDng(file: CameraFile): Boolean =
 
 private fun Thumbnail.toImageBitmap(): ImageBitmap =
     Bitmap.createBitmap(argb, width, height, Bitmap.Config.ARGB_8888).asImageBitmap()
+
+private fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 private fun share(context: Context, file: File) {
     val uri = FileProvider.getUriForFile(

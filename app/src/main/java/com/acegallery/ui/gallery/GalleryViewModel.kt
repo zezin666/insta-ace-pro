@@ -114,6 +114,10 @@ class GalleryViewModel @Inject constructor(
         clearSelection()
     }
 
+    fun enqueue(files: List<CameraFile>) {
+        if (files.isNotEmpty()) downloadManager.enqueue(files)
+    }
+
     fun disconnect() {
         session.disconnect()
         _state.value = _state.value.copy(

@@ -1,5 +1,10 @@
 package com.acegallery.ui
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +28,18 @@ fun AceGalleryNav() {
     val navController = rememberNavController()
     var viewerFiles by remember { mutableStateOf<List<CameraFile>>(emptyList()) }
 
-    NavHost(navController = navController, startDestination = "gallery") {
+    NavHost(
+        navController = navController,
+        startDestination = "gallery",
+        enterTransition = {
+            fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 10 }
+        },
+        exitTransition = { fadeOut(tween(160)) },
+        popEnterTransition = { fadeIn(tween(220)) },
+        popExitTransition = {
+            fadeOut(tween(160)) + slideOutHorizontally(tween(160)) { it / 10 }
+        },
+    ) {
         composable("gallery") {
             GalleryScreen(
                 onOpenViewer = { files, index ->
