@@ -10,7 +10,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -32,6 +36,11 @@ class CameraProtocolClient(
     private val sendLock = Any()
     private var readerJob: Job? = null
     private var keepAliveJob: Job? = null
+    private val _livePackets = MutableSharedFlow<ByteArray>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val livePackets: Flow<ByteArray> = _livePackets.asSharedFlow()
 
     override fun start() {
         send(SYNC)
@@ -80,8 +89,14 @@ class CameraProtocolClient(
         try {
             while (alive.get()) {
                 val frame = CameraFrame.read(input) ?: break
-                if (frame.isNotEmpty() && frame[0] == 0x04.toByte()) {
-                    handleMessage(frame)
+                when {
+                    frame.isEmpty() -> Unit
+                    frame[0] == 0x01.toByte() -> {
+                        if (frame.size > 12 && frame[3] == 0x20.toByte()) {
+                            _livePackets.tryEmit(frame.copyOfRange(12, frame.size))
+                        }
+                    }
+                    frame[0] == 0x04.toByte() -> handleMessage(frame)
                 }
             }
         } catch (_: IOException) {

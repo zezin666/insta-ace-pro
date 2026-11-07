@@ -19,6 +19,7 @@ import com.acegallery.download.DownloadService
 import com.acegallery.model.CameraFile
 import com.acegallery.ui.diagnostics.DiagnosticsScreen
 import com.acegallery.ui.gallery.GalleryScreen
+import com.acegallery.ui.live.LiveViewScreen
 import com.acegallery.ui.settings.SettingsScreen
 import com.acegallery.ui.viewer.ViewerScreen
 import com.acegallery.ui.viewer.ViewerViewModel
@@ -47,6 +48,7 @@ fun AceGalleryNav() {
                     navController.navigate("viewer/$index")
                 },
                 onOpenSettings = { navController.navigate("settings") },
+                onOpenLive = { navController.navigate("live") },
             )
         }
         composable("viewer/{index}") { entry ->
@@ -70,6 +72,9 @@ fun AceGalleryNav() {
                 onBack = { navController.popBackStack() },
                 onOpenDiagnostics = { navController.navigate("diagnostics") },
             )
+        }
+        composable("live") {
+            LiveViewScreen(onBack = { navController.popBackStack() })
         }
         composable("diagnostics") {
             DiagnosticsScreen(onBack = { navController.popBackStack() })

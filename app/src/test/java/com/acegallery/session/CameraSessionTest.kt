@@ -5,6 +5,9 @@ import com.acegallery.network.CameraNetworkFinder
 import com.acegallery.network.CameraNetworkHandle
 import com.acegallery.proto.CameraProto
 import java.net.Socket
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -60,6 +63,7 @@ class CameraSessionTest {
         transportFactory = CameraTransportFactory { transport },
         socketConnector = CameraSocketConnector { _, _, _ -> Socket() },
         httpClientFactory = CameraHttpClientProvider { OkHttpClient() },
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
     )
 
     private class FakeFinder(private val handle: CameraNetworkHandle?) : CameraNetworkFinder {

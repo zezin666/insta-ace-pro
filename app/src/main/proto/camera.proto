@@ -38,3 +38,62 @@ message DeleteFiles {
 message DeleteFilesResp {
   repeated string fail_uri = 1;
 }
+
+enum VideoResolution {
+  UNKNOWN_RESOLUTION = 0;
+  RES_1920_960P30 = 2;
+  RES_1440_720P30 = 9;
+  RES_1920_1080P30 = 29;
+  RES_424_240P15 = 34;
+  RES_1920_1080P60 = 40;
+  RES_1280_720P30 = 43;
+  RES_1280_960P30 = 44;
+}
+
+enum CaptureMode {
+  CAPTURE_MODE_UNKNOWN = 0;
+  CAPTURE_MODE_NORMAL = 1;
+}
+
+enum TakePictureMode {
+  TAKE_PICTURE_NORMAL = 0;
+  TAKE_PICTURE_AEB = 1;
+  TAKE_PICTURE_BURST = 3;
+  TAKE_PICTURE_AEB_NIGHT = 4;
+}
+
+message StartLiveStream {
+  bool enable_audio = 1;
+  bool enable_video = 2;
+  uint32 audio_type = 3;
+  uint32 audio_sample_rate = 4;
+  uint32 audio_bitrate = 5;
+  uint32 video_bitrate = 6;
+  VideoResolution resolution = 7;
+  bool enable_gyro = 8;
+  uint32 video_bitrate1 = 9;
+  VideoResolution resolution1 = 10;
+  uint32 preview_stream_num = 11;
+  bool enable_rotate = 12;
+  bool is_for_live = 13;
+}
+
+message StartLiveStreamResp {}
+
+message StartCapture {
+  CaptureMode mode = 1;
+}
+
+message StartCaptureResp {}
+
+message StopCapture {
+  CaptureMode mode = 2;
+}
+
+message StopCaptureResp {}
+
+message TakePicture {
+  TakePictureMode mode = 1;
+}
+
+message TakePictureResponse {}

@@ -1,5 +1,6 @@
 package com.acegallery.session
 
+import com.acegallery.camera.CameraCommands
 import com.acegallery.camera.CameraTransport
 import com.acegallery.model.CameraFile
 import com.acegallery.network.CameraFileSource
@@ -7,14 +8,24 @@ import com.acegallery.network.CameraFileSourceProvider
 import com.acegallery.network.CameraNetworkFinder
 import com.acegallery.network.CameraNetworkHandle
 import com.acegallery.network.HttpCameraFileSource
+import com.acegallery.proto.CameraProto
 import com.acegallery.repository.CameraFileRepository
 import java.net.Socket
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -22,12 +33,18 @@ import okhttp3.OkHttpClient
 
 interface CameraGateway : CameraFileSourceProvider {
     val state: StateFlow<CameraState>
+    val livePackets: Flow<ByteArray> get() = emptyFlow()
     suspend fun connect(host: String = DEFAULT_HOST)
     fun disconnect()
     suspend fun listFiles(): List<CameraFile>
     fun repository(): CameraFileRepository
     fun transport(): CameraTransport
     fun httpClient(): OkHttpClient
+    suspend fun startLiveStream() = Unit
+    suspend fun stopLiveStream() = Unit
+    suspend fun takePicture() = Unit
+    suspend fun startRecording() = Unit
+    suspend fun stopRecording() = Unit
 
     companion object {
         const val DEFAULT_HOST = "192.168.42.1"
@@ -52,11 +69,19 @@ class CameraSession @Inject constructor(
     private val transportFactory: CameraTransportFactory,
     private val socketConnector: CameraSocketConnector,
     private val httpClientFactory: CameraHttpClientProvider,
+    private val scope: CoroutineScope,
 ) : CameraGateway, CameraFileSourceProvider {
 
     private val mutex = Mutex()
     private val _state = MutableStateFlow<CameraState>(CameraState.Disconnected)
     override val state: StateFlow<CameraState> = _state.asStateFlow()
+
+    private val _livePackets = MutableSharedFlow<ByteArray>(
+        extraBufferCapacity = 256,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val livePackets: Flow<ByteArray> = _livePackets.asSharedFlow()
+    private var liveCollector: Job? = null
 
     private var transport: CameraTransport? = null
     private var repository: CameraFileRepository? = null
@@ -82,6 +107,13 @@ class CameraSession @Inject constructor(
                     client = newClient
                     repository = CameraFileRepository(newTransport)
                     fileSource = HttpCameraFileSource("http://$host", newClient)
+
+                    liveCollector?.cancel()
+                    liveCollector = scope.launch {
+                        newTransport.livePackets.collect { packet ->
+                            _livePackets.emit(packet)
+                        }
+                    }
                 }
                 _state.value = CameraState.Connected(host)
             } catch (exc: Exception) {
@@ -107,6 +139,54 @@ class CameraSession @Inject constructor(
     override fun httpClient(): OkHttpClient =
         client ?: throw IllegalStateException("未连接相机")
 
+    override suspend fun startLiveStream() {
+        val request = CameraProto.StartLiveStream.newBuilder()
+            .setEnableVideo(true)
+            .setEnableAudio(false)
+            .setAudioSampleRate(48_000)
+            .setEnableGyro(false)
+            .setResolution(CameraProto.VideoResolution.RES_1920_1080P30)
+            .setResolution1(CameraProto.VideoResolution.RES_424_240P15)
+            .build()
+        transport().request(
+            CameraCommands.START_LIVE_STREAM,
+            request.toByteArray(),
+            timeoutMs = 8_000,
+        )
+    }
+
+    override suspend fun stopLiveStream() {
+        runCatching {
+            transport().request(CameraCommands.STOP_LIVE_STREAM, ByteArray(0), timeoutMs = 5_000)
+        }
+    }
+
+    override suspend fun takePicture() {
+        val request = CameraProto.TakePicture.newBuilder()
+            .setMode(CameraProto.TakePictureMode.TAKE_PICTURE_NORMAL)
+            .build()
+        transport().request(
+            CameraCommands.TAKE_PICTURE,
+            request.toByteArray(),
+            timeoutMs = 10_000,
+        )
+    }
+
+    override suspend fun startRecording() {
+        val request = CameraProto.StartCapture.newBuilder()
+            .setMode(CameraProto.CaptureMode.CAPTURE_MODE_NORMAL)
+            .build()
+        transport().request(
+            CameraCommands.START_CAPTURE,
+            request.toByteArray(),
+            timeoutMs = 8_000,
+        )
+    }
+
+    override suspend fun stopRecording() {
+        transport().request(CameraCommands.STOP_CAPTURE, ByteArray(0), timeoutMs = 15_000)
+    }
+
     override suspend fun get(): CameraFileSource {
         if (transport?.isAlive() != true) connect(lastHost)
         return fileSource ?: throw IllegalStateException(
@@ -115,6 +195,8 @@ class CameraSession @Inject constructor(
     }
 
     private fun disconnectInternal() {
+        liveCollector?.cancel()
+        liveCollector = null
         runCatching { transport?.close() }
         transport = null
         repository = null
