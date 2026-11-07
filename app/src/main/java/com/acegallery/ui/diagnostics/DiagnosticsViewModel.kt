@@ -6,10 +6,12 @@ import com.acegallery.session.CameraGateway
 import com.acegallery.thumbnail.ThumbnailLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class DiagnosticResult(
     val name: String,
@@ -45,7 +47,9 @@ class DiagnosticsViewModel @Inject constructor(
                     val size = runCatching { session.get().size(first.path) }.getOrNull()
                     out += DiagnosticResult("HTTP HEAD", size?.toString() ?: "失败")
 
-                    val thumb = runCatching { thumbnails.load(first) }.getOrNull()
+                    val thumb = runCatching {
+                        withContext(Dispatchers.IO) { thumbnails.load(first) }
+                    }.getOrNull()
                     out += DiagnosticResult(
                         "缩略图（命令 11）",
                         if (thumb != null) "${thumb.width}×${thumb.height}" else "失败",

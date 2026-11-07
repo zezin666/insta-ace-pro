@@ -11,11 +11,13 @@ import com.acegallery.repository.CameraFileRepository
 import java.net.Socket
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 interface CameraGateway : CameraFileSourceProvider {
@@ -68,17 +70,19 @@ class CameraSession @Inject constructor(
             _state.value = CameraState.Connecting
             lastHost = host
             try {
-                val handle = networkFinder.find(host, PORT)
-                    ?: error(NOT_CONNECTED_MESSAGE)
-                val socket = socketConnector.connect(handle, host, PORT)
-                val newTransport = transportFactory.create(socket).also { it.start() }
-                val newClient = httpClientFactory.create(handle)
+                withContext(Dispatchers.IO) {
+                    val handle = networkFinder.find(host, PORT)
+                        ?: error(NOT_CONNECTED_MESSAGE)
+                    val socket = socketConnector.connect(handle, host, PORT)
+                    val newTransport = transportFactory.create(socket).also { it.start() }
+                    val newClient = httpClientFactory.create(handle)
 
-                disconnectInternal()
-                transport = newTransport
-                client = newClient
-                repository = CameraFileRepository(newTransport)
-                fileSource = HttpCameraFileSource("http://$host", newClient)
+                    disconnectInternal()
+                    transport = newTransport
+                    client = newClient
+                    repository = CameraFileRepository(newTransport)
+                    fileSource = HttpCameraFileSource("http://$host", newClient)
+                }
                 _state.value = CameraState.Connected(host)
             } catch (exc: Exception) {
                 disconnectInternal()
