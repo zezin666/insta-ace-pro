@@ -10,11 +10,22 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
 import android.provider.MediaStore
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
 import com.acegallery.model.CameraFile
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 /**
  * Turns a camera video into one Android Motion Photo JPEG that is recognized by
@@ -76,9 +87,54 @@ class LivePhotoExporter(private val context: Context) {
         }
     }
 
-    private fun createClip(video: File, dir: File): File {
+    private suspend fun createClip(video: File, dir: File): File {
         val output = File(dir, "${video.nameWithoutExtension}_live.mp4")
         output.delete()
+        return runCatching { transcodeClip(video, output) }
+            .getOrElse { error ->
+                android.util.Log.w("LivePhoto", "Transformer failed; remuxing", error)
+                output.delete()
+                remuxClip(video, output)
+            }
+    }
+
+    private suspend fun transcodeClip(video: File, output: File): File =
+        withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { continuation ->
+                val transformer = Transformer.Builder(context)
+                    .setVideoMimeType(MimeTypes.VIDEO_H264)
+                    .build()
+                transformer.addListener(object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        continuation.resume(Unit)
+                    }
+
+                    override fun onError(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                        exception: ExportException,
+                    ) {
+                        continuation.resumeWithException(exception)
+                    }
+                })
+                val mediaItem = MediaItem.Builder()
+                    .setUri(Uri.fromFile(video))
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder()
+                            .setEndPositionMs(3_000)
+                            .build(),
+                    )
+                    .build()
+                transformer.start(
+                    EditedMediaItem.Builder(mediaItem).build(),
+                    output.absolutePath,
+                )
+            }
+            require(output.exists() && output.length() > 0) { "转码片段为空" }
+            output
+        }
+
+    private fun remuxClip(video: File, output: File): File {
         val extractor = MediaExtractor()
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {

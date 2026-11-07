@@ -21,6 +21,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +80,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil3.compose.AsyncImage
 import com.acegallery.export.LivePhotoExporter
+import com.acegallery.export.WatermarkExporter
 import com.acegallery.model.CameraFile
 import com.acegallery.model.CameraFileKind
 import com.acegallery.session.CameraGateway
@@ -129,6 +131,7 @@ fun ViewerScreen(
     var currentSize by remember(current.path) { mutableStateOf(current.sizeBytes) }
     var readyFiles by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
     val exporter = remember { LivePhotoExporter(context) }
+    val watermarkExporter = remember { WatermarkExporter(context) }
     val exportScope = rememberCoroutineScope()
     var exportBusy by remember { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
@@ -154,6 +157,26 @@ fun ViewerScreen(
                     exportMessage = "已导出 Live 图到相册"
                 } catch (exc: Exception) {
                     exportMessage = exc.message ?: "导出 Live 图失败"
+                } finally {
+                    exportBusy = false
+                }
+            }
+        }
+    }
+
+    val startWatermark: (CameraFile) -> Unit = { file ->
+        if (!exportBusy) {
+            exportScope.launch {
+                exportBusy = true
+                exportMessage = null
+                try {
+                    val source = withContext(Dispatchers.IO) {
+                        PhotoCache(session, context.cacheDir).get(file)
+                    }
+                    withContext(Dispatchers.IO) { watermarkExporter.exportPhoto(source, file) }
+                    exportMessage = "已导出带水印照片"
+                } catch (exc: Exception) {
+                    exportMessage = exc.message ?: "导出带水印照片失败"
                 } finally {
                     exportBusy = false
                 }
@@ -247,6 +270,11 @@ fun ViewerScreen(
                 file = current,
                 sizeBytes = currentSize,
                 onShare = readyFiles[current.path]?.let { file -> { share(context, file) } },
+                onWatermark = if (isViewablePhoto(current)) {
+                    { startWatermark(current) }
+                } else {
+                    null
+                },
             )
         }
 
@@ -273,8 +301,8 @@ fun ViewerScreen(
     if (exportBusy) {
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("生成 Live 图") },
-            text = { Text("正在准备视频并写入系统相册，请稍候…") },
+            title = { Text("正在导出") },
+            text = { Text("正在准备文件并写入系统相册，请稍候…") },
             confirmButton = {},
         )
     }
@@ -343,6 +371,7 @@ private fun BottomChrome(
     file: CameraFile,
     sizeBytes: Long?,
     onShare: (() -> Unit)?,
+    onWatermark: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -368,20 +397,33 @@ private fun BottomChrome(
                 color = Color.White.copy(alpha = 0.65f),
                 style = MaterialTheme.typography.labelSmall,
             )
-            if (onShare != null) {
+            if (onShare != null || onWatermark != null) {
                 Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = onShare,
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                ) {
-                    Icon(
-                        Icons.Filled.Share,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("分享")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (onShare != null) {
+                        OutlinedButton(
+                            onClick = onShare,
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        ) {
+                            Icon(
+                                Icons.Filled.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("分享")
+                        }
+                    }
+                    if (onWatermark != null) {
+                        OutlinedButton(
+                            onClick = onWatermark,
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        ) {
+                            Text("水印")
+                        }
+                    }
                 }
             }
         }
