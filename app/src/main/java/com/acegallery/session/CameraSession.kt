@@ -18,7 +18,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 
-interface CameraGateway {
+interface CameraGateway : CameraFileSourceProvider {
     val state: StateFlow<CameraState>
     suspend fun connect(host: String = DEFAULT_HOST)
     fun disconnect()
@@ -26,7 +26,6 @@ interface CameraGateway {
     fun repository(): CameraFileRepository
     fun transport(): CameraTransport
     fun httpClient(): OkHttpClient
-    suspend fun get(): CameraFileSource
 
     companion object {
         const val DEFAULT_HOST = "192.168.42.1"
