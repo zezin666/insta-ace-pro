@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package insta360.messages;
+
+option java_package = "com.acegallery.proto";
+option java_outer_classname = "CameraProto";
+
+enum MediaType {
+  VIDEO = 0;
+  PHOTO = 1;
+  VIDEO_AND_PHOTO = 2;
+  DNG = 3;
+  MP4 = 4;
+  JPG = 5;
+  INS_DATA = 6;
+}
+
+message GetFileList {
+  MediaType media_type = 1;
+  uint32 start = 2;
+  uint32 limit = 3;
+}
+
+message GetFileListResp {
+  repeated string uri = 1;
+  uint32 total_count = 2;
+}
+
+message GetFileExtra {
+  string uri = 1;
+  uint32 extra_type = 2;
+}
+
+message DeleteFiles {
+  repeated string uri = 1;
+}
+
+message DeleteFilesResp {
+  repeated string fail_uri = 1;
+}
