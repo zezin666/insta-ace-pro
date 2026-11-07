@@ -10,10 +10,12 @@ import com.acegallery.session.CameraState
 import com.acegallery.thumbnail.ThumbnailLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class GalleryUiState(
     val connection: CameraState = CameraState.Disconnected,
@@ -39,6 +41,22 @@ class GalleryViewModel @Inject constructor(
     val thumbnails: ThumbnailLoader get() = thumbnailLoader
     val downloads: StateFlow<List<DownloadManager.Item>> get() = downloadManager.items
 
+    private val _downloadedPaths = MutableStateFlow<Set<String>>(emptySet())
+    val downloadedPaths: StateFlow<Set<String>> = _downloadedPaths.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            downloadManager.items.collect { items ->
+                val done = items
+                    .filter { it.state is DownloadManager.State.Done }
+                    .map { it.file.path }
+                if (done.isNotEmpty()) {
+                    _downloadedPaths.value = _downloadedPaths.value + done
+                }
+            }
+        }
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
@@ -52,6 +70,7 @@ class GalleryViewModel @Inject constructor(
                     isLoading = false,
                     error = null,
                 )
+                markDownloaded(files)
             } catch (exc: Exception) {
                 _state.value = _state.value.copy(
                     connection = session.state.value,
@@ -69,6 +88,30 @@ class GalleryViewModel @Inject constructor(
         )
     }
 
+    fun toggleSelection(path: String) {
+        val current = _state.value
+        val selected = if (path in current.selected) {
+            current.selected - path
+        } else {
+            current.selected + path
+        }
+        _state.value = current.copy(
+            selected = selected,
+            selectionMode = selected.isNotEmpty(),
+        )
+    }
+
+    fun clearSelection() {
+        _state.value = _state.value.copy(selected = emptySet(), selectionMode = false)
+    }
+
+    fun downloadSelected() {
+        val selected = _state.value.files.filter { it.path in _state.value.selected }
+        if (selected.isEmpty()) return
+        downloadManager.enqueue(selected)
+        clearSelection()
+    }
+
     fun disconnect() {
         session.disconnect()
         _state.value = _state.value.copy(
@@ -76,5 +119,16 @@ class GalleryViewModel @Inject constructor(
             files = emptyList(),
             sections = emptyList(),
         )
+    }
+
+    private fun markDownloaded(files: List<CameraFile>) {
+        viewModelScope.launch {
+            val downloaded = withContext(Dispatchers.IO) {
+                files.filter { downloadManager.isDownloaded(it) }
+                    .map { it.path }
+                    .toSet()
+            }
+            _downloadedPaths.value = downloaded
+        }
     }
 }
