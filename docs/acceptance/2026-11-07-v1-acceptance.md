@@ -9,8 +9,9 @@
 
 | 项目 | 命令 | 结果 |
 |---|---|---|
-| 单元测试 | `JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest` | 64/64 通过 |
+| 单元测试 | `JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest` | 74/74 通过 |
 | Debug 构建 | `JAVA_HOME=/d/JDK17 ./gradlew :app:assembleDebug` | BUILD SUCCESSFUL，APK 37 MB |
+| HTTP 明文 | 合并 Manifest 检查 | `usesCleartextTraffic="true"` 已生效（下载/照片/视频依赖） |
 | 协议探测 | `python tools/probe/probe.py --host 192.168.42.1 --out docs/protocol` | 文件列表 356 个 / 4 页；HEAD 200；Range 206；缩略图 NV12 704×544（照片）、896×512（视频） |
 
 ## 真机验收（待执行）
