@@ -1,27 +1,18 @@
 package com.acegallery.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.acegallery.model.CameraFile
+import com.acegallery.ui.diagnostics.DiagnosticsScreen
 import com.acegallery.ui.gallery.GalleryScreen
+import com.acegallery.ui.settings.SettingsScreen
 import com.acegallery.ui.viewer.ViewerScreen
 import com.acegallery.ui.viewer.ViewerViewModel
 
@@ -51,22 +42,13 @@ fun AceGalleryNav() {
             )
         }
         composable("settings") {
-            PlaceholderSettings(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenDiagnostics = { navController.navigate("diagnostics") },
+            )
         }
-    }
-}
-
-@Composable
-private fun PlaceholderSettings(onBack: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("设置")
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = onBack) { Text("返回") }
+        composable("diagnostics") {
+            DiagnosticsScreen(onBack = { navController.popBackStack() })
+        }
     }
 }
