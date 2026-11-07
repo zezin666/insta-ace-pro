@@ -18,13 +18,23 @@ object CameraNetworkSelector {
     }
 }
 
-interface CameraNetworkFinder {
-    suspend fun find(host: String, port: Int): Network?
+interface CameraNetworkHandle {
+    fun bind(socket: Socket)
 }
 
-class BoundSocketFactory(private val network: Network) : SocketFactory() {
+class AndroidNetworkHandle(private val network: Network) : CameraNetworkHandle {
+    override fun bind(socket: Socket) {
+        network.bindSocket(socket)
+    }
+}
 
-    override fun createSocket(): Socket = Socket().also { network.bindSocket(it) }
+interface CameraNetworkFinder {
+    suspend fun find(host: String, port: Int): CameraNetworkHandle?
+}
+
+class BoundSocketFactory(private val handle: CameraNetworkHandle) : SocketFactory() {
+
+    override fun createSocket(): Socket = Socket().also { handle.bind(it) }
 
     override fun createSocket(host: String?, port: Int): Socket {
         requireNotNull(host) { "host is required" }
