@@ -40,7 +40,7 @@ class DownloadManager(
     private val tempDir: File,
     private val scope: CoroutineScope,
     private val freeSpace: FreeSpaceChecker,
-    private val retryCount: Int = 3,
+    private val retryCount: Int = 7,
 ) : DownloadQueue {
 
     sealed interface State {
@@ -133,6 +133,13 @@ class DownloadManager(
                 update(file, State.Done)
                 return
             } catch (exc: Exception) {
+                runCatching {
+                    android.util.Log.w(
+                        "AceDownload",
+                        "attempt ${attempt + 1} failed for ${file.path}",
+                        exc,
+                    )
+                }
                 pending?.let {
                     runCatching { writer.delete(it) }
                     pending = null
@@ -175,7 +182,7 @@ class DownloadManager(
         return when {
             message.contains("存储") -> "存储空间不足"
             message.contains("HTTP ") -> "相机返回错误（HTTP ${message.substringAfter("HTTP ").takeWhile { it.isDigit() }}）"
-            exc is IOException -> "相机连接断开"
+            exc is IOException -> "相机连接断开（${exc.javaClass.simpleName}: ${message}）"
             message.isNotBlank() -> message
             else -> "下载失败"
         }

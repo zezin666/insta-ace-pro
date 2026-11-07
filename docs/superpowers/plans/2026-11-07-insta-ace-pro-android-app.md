@@ -17,7 +17,7 @@
 - 版本基线（全部为已验证存在的稳定版）：AGP 8.7.3、Kotlin 2.1.0、KSP 2.1.0-1.0.29、Compose BOM 2024.12.01、Hilt 2.53.1、OkHttp 4.12.0、Media3 1.5.1、Coil 3.0.4、DataStore 1.1.1、protobuf-javalite 4.29.1、protobuf-gradle-plugin 0.9.4。
 - 所有发往 `192.168.42.1` 的请求必须绑定相机 WiFi 的 `Network`；App 不得向互联网发送任何业务请求。
 - v1 只读：不删除、不修改相机文件，不提供拍摄控制。
-- 下载串行执行，失败重试 3 次（1s/2s/4s）；临时文件放 `filesDir/downloads/`，不用 `cacheDir`。
+- 下载串行执行，失败最多尝试 7 次（间隔 1s/2s/4s/8s/16s/32s，覆盖 WiFi 重连时间）；临时文件放 `filesDir/downloads/`，不用 `cacheDir`。
 - 每个任务先写失败测试再实现；每个任务结束必须提交。
 - 单元测试必须能在 JVM 上运行（Android 专属行为用接口隔离 + 手动验证）。
 
@@ -808,7 +808,7 @@ git commit -m "feat: add MediaStore writer"
   - `fun interface FreeSpaceChecker { fun freeBytes(): Long }`
   - `interface DownloadQueue { val items: StateFlow<List<DownloadManager.Item>>; fun enqueue(files: List<CameraFile>); fun cancelAll(); suspend fun isDownloaded(file: CameraFile): Boolean }`
   - `fun tempNameFor(path: String): String`（`sha256(path) + ".part"`）
-  - `class DownloadManager(private val sourceProvider: CameraFileSourceProvider, private val writer: MediaStoreWriter, private val tempDir: File, private val scope: CoroutineScope, private val freeSpace: FreeSpaceChecker, private val retryCount: Int = 3) : DownloadQueue`
+  - `class DownloadManager(private val sourceProvider: CameraFileSourceProvider, private val writer: MediaStoreWriter, private val tempDir: File, private val scope: CoroutineScope, private val freeSpace: FreeSpaceChecker, private val retryCount: Int = 7) : DownloadQueue`
   - `sealed interface State { data object Queued; data class Downloading(val bytes: Long, val total: Long?); data object Done; data class Failed(val reason: String) }`
   - `data class Item(val file: CameraFile, val state: State)`
   - `val items: StateFlow<List<Item>>`
@@ -834,11 +834,11 @@ git commit -m "feat: add MediaStore writer"
     assertEquals(10L, fakeSource.lastOffset)
 }
 
-@Test fun `retries three times then fails`() = runTest {
+@Test fun `retries seven times then fails`() = runTest {
     fakeSource.failAlways = true
     manager.enqueue(listOf(fileA))
     advanceUntilIdle()
-    assertEquals(3, fakeSource.attempts)
+    assertEquals(7, fakeSource.attempts)
     assertTrue(manager.items.value.single().state is State.Failed)
 }
 
@@ -869,7 +869,7 @@ Expected: FAIL。
 - 每个文件：每次尝试都重新 `val source = sourceProvider.get()`（断线时触发重连），`val total = source.size(path)`；先查 `writer.findDownloaded(file.copy(sizeBytes = total))`，非空直接 `Done`（不重复下载）；若 `total != null && freeSpace.freeBytes() < total` → `Failed("存储空间不足")`。
 - 临时名 `sha256(path) + ".part"`；`offset = temp.length()`；调用 `source.download(path, temp, offset)`，进度用 `total` 显示。
 - 成功后：`createPending` → `copyInto` → `publish` → 删除临时文件 → `Done`。
-- 异常：重试 `retryCount` 次，退避 1s/2s/4s，保留临时文件；最终 `Failed(reason)`；若已创建 MediaStore 行则 `delete`。
+- 异常：最多尝试 `retryCount` 次，退避 1s/2s/4s/8s/16s/32s，保留临时文件；最终 `Failed(reason)`；若已创建 MediaStore 行则 `delete`。
 - `reason` 分类：连接/超时类 → `"相机连接断开"`；HTTP 4xx/5xx → `"相机返回错误（HTTP xxx）"`；空间类 → `"存储空间不足"`；其他 → 异常消息。
 - `cancelAll` 取消 worker 并把未完成项标为 `Failed("已取消")`。
 - 新增测试：已存在的文件被跳过（`findDownloaded` 返回非空时 `download` 不被调用）；空间不足时不下载。

@@ -62,14 +62,14 @@ class DownloadManagerTest {
     }
 
     @Test
-    fun `retries three times then fails`() = runTest {
+    fun `retries seven times then fails`() = runTest {
         val source = FakeFileSource(failAlways = true)
         val manager = manager(FakeProvider(source), FakeWriter(), plenty)
 
         manager.enqueue(listOf(fileA))
         advanceUntilIdle()
 
-        assertEquals(3, source.attempts)
+        assertEquals(7, source.attempts)
         assertTrue(manager.items.value.single().state is DownloadManager.State.Failed)
     }
 
