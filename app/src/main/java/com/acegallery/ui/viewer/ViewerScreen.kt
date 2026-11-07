@@ -35,10 +35,12 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -47,6 +49,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +78,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil3.compose.AsyncImage
+import com.acegallery.export.LivePhotoExporter
 import com.acegallery.model.CameraFile
 import com.acegallery.model.CameraFileKind
 import com.acegallery.session.CameraGateway
@@ -82,6 +87,8 @@ import com.acegallery.thumbnail.ThumbnailLoader
 import java.io.File
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -121,6 +128,38 @@ fun ViewerScreen(
     val current = files[pagerState.currentPage]
     var currentSize by remember(current.path) { mutableStateOf(current.sizeBytes) }
     var readyFiles by remember { mutableStateOf<Map<String, File>>(emptyMap()) }
+    val exporter = remember { LivePhotoExporter(context) }
+    val exportScope = rememberCoroutineScope()
+    var exportBusy by remember { mutableStateOf(false) }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(exportMessage) {
+        val message = exportMessage
+        if (message != null) {
+            delay(4_000)
+            if (exportMessage == message) exportMessage = null
+        }
+    }
+
+    val startExport: (CameraFile) -> Unit = { file ->
+        if (!exportBusy) {
+            exportScope.launch {
+                exportBusy = true
+                exportMessage = null
+                try {
+                    val source = withContext(Dispatchers.IO) {
+                        PhotoCache(session, context.cacheDir).get(file)
+                    }
+                    withContext(Dispatchers.IO) { exporter.export(source, file) }
+                    exportMessage = "已导出 Live 图到相册"
+                } catch (exc: Exception) {
+                    exportMessage = exc.message ?: "导出 Live 图失败"
+                } finally {
+                    exportBusy = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(current.path) {
         if (currentSize == null) {
@@ -190,6 +229,11 @@ fun ViewerScreen(
                 total = files.size,
                 onBack = onBack,
                 onDownload = { onDownload(current) },
+                onExportLive = if (current.kind == CameraFileKind.VIDEO) {
+                    { startExport(current) }
+                } else {
+                    null
+                },
             )
         }
 
@@ -205,6 +249,34 @@ fun ViewerScreen(
                 onShare = readyFiles[current.path]?.let { file -> { share(context, file) } },
             )
         }
+
+        exportMessage?.let { message ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 96.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.78f),
+                        RoundedCornerShape(24.dp),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(
+                    text = message,
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+
+    if (exportBusy) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("生成 Live 图") },
+            text = { Text("正在准备视频并写入系统相册，请稍候…") },
+            confirmButton = {},
+        )
     }
 }
 
@@ -215,6 +287,7 @@ private fun TopChrome(
     total: Int,
     onBack: () -> Unit,
     onDownload: () -> Unit,
+    onExportLive: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -244,6 +317,15 @@ private fun TopChrome(
                     color = Color.White.copy(alpha = 0.65f),
                     style = MaterialTheme.typography.labelSmall,
                 )
+            }
+            if (onExportLive != null) {
+                TextButton(onClick = onExportLive) {
+                    Text(
+                        text = "LIVE",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
             }
             IconButton(onClick = onDownload) {
                 Icon(
