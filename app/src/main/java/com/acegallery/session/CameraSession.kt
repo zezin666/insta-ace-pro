@@ -33,12 +33,24 @@ interface CameraGateway {
     }
 }
 
+fun interface CameraTransportFactory {
+    fun create(socket: Socket): CameraTransport
+}
+
+fun interface CameraSocketConnector {
+    fun connect(handle: CameraNetworkHandle, host: String, port: Int): Socket
+}
+
+fun interface CameraHttpClientProvider {
+    fun create(handle: CameraNetworkHandle): OkHttpClient
+}
+
 @Singleton
 class CameraSession @Inject constructor(
     private val networkFinder: CameraNetworkFinder,
-    private val transportFactory: (Socket) -> CameraTransport,
-    private val socketConnector: (CameraNetworkHandle, String, Int) -> Socket,
-    private val httpClientFactory: (CameraNetworkHandle) -> OkHttpClient,
+    private val transportFactory: CameraTransportFactory,
+    private val socketConnector: CameraSocketConnector,
+    private val httpClientFactory: CameraHttpClientProvider,
 ) : CameraGateway, CameraFileSourceProvider {
 
     private val mutex = Mutex()
@@ -59,9 +71,9 @@ class CameraSession @Inject constructor(
             try {
                 val handle = networkFinder.find(host, PORT)
                     ?: error(NOT_CONNECTED_MESSAGE)
-                val socket = socketConnector(handle, host, PORT)
-                val newTransport = transportFactory(socket).also { it.start() }
-                val newClient = httpClientFactory(handle)
+                val socket = socketConnector.connect(handle, host, PORT)
+                val newTransport = transportFactory.create(socket).also { it.start() }
+                val newClient = httpClientFactory.create(handle)
 
                 disconnectInternal()
                 transport = newTransport

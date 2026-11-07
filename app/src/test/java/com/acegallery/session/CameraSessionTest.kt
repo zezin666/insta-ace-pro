@@ -57,9 +57,9 @@ class CameraSessionTest {
         transport: CameraTransport = FakeTransport(),
     ): CameraSession = CameraSession(
         networkFinder = finder,
-        transportFactory = { transport },
-        socketConnector = { _, _, _ -> Socket() },
-        httpClientFactory = { OkHttpClient() },
+        transportFactory = CameraTransportFactory { transport },
+        socketConnector = CameraSocketConnector { _, _, _ -> Socket() },
+        httpClientFactory = CameraHttpClientProvider { OkHttpClient() },
     )
 
     private class FakeFinder(private val handle: CameraNetworkHandle?) : CameraNetworkFinder {
