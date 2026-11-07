@@ -1,0 +1,14 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+*.apk
+tools/gradle/
+tools/probe/out/
+tools/probe/__pycache__/
+.superpowers/
+.kotlin/
+captures/
+docs/protocol/sample.bin
