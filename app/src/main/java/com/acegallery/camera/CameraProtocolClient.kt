@@ -1,0 +1,120 @@
+package com.acegallery.camera
+
+import java.io.IOException
+import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+
+class CameraProtocolTimeoutException(message: String) : IOException(message)
+
+class CameraProtocolClient(
+    private val socket: Socket,
+    private val scope: CoroutineScope,
+    private val keepAliveMs: Long = 2_000,
+) : CameraTransport {
+
+    private val input = socket.getInputStream()
+    private val output = socket.getOutputStream()
+    private val pending = ConcurrentHashMap<Int, CompletableDeferred<ByteArray>>()
+    private val nextSeq = AtomicInteger(0)
+    private val alive = AtomicBoolean(true)
+    private val sendLock = Any()
+    private var readerJob: Job? = null
+    private var keepAliveJob: Job? = null
+
+    override fun start() {
+        send(SYNC)
+        send(KEEPALIVE)
+        readerJob = scope.launch(Dispatchers.IO) { readLoop() }
+        keepAliveJob = scope.launch(Dispatchers.IO) {
+            while (isActive && alive.get()) {
+                delay(keepAliveMs)
+                if (!alive.get()) break
+                runCatching { send(KEEPALIVE) }
+            }
+        }
+    }
+
+    override fun isAlive(): Boolean = alive.get()
+
+    override fun request(command: Int, payload: ByteArray, timeoutMs: Long): ByteArray {
+        if (!alive.get()) throw IOException("camera connection is closed")
+        val sequence = nextSeq.getAndUpdate { (it + 1) and 0xFFFFFF }
+        val deferred = CompletableDeferred<ByteArray>()
+        pending[sequence] = deferred
+        try {
+            send(MessageCodec.encodeHeader(command, sequence) + payload)
+            return runBlocking {
+                withTimeout(timeoutMs) { deferred.await() }
+            }
+        } catch (timeout: TimeoutCancellationException) {
+            throw CameraProtocolTimeoutException("no response to command $command")
+        } finally {
+            pending.remove(sequence)
+        }
+    }
+
+    private fun readLoop() {
+        try {
+            while (alive.get()) {
+                val frame = CameraFrame.read(input) ?: break
+                if (frame.isNotEmpty() && frame[0] == 0x04.toByte()) {
+                    handleMessage(frame)
+                }
+            }
+        } catch (_: IOException) {
+            // Connection dropped; the finally block marks the transport dead.
+        } finally {
+            alive.set(false)
+            failAll(IOException("camera connection closed"))
+        }
+    }
+
+    private fun handleMessage(frame: ByteArray) {
+        if (frame.size < 12) return
+        val header = MessageCodec.parseHeader(frame)
+        val deferred = pending.remove(header.seq) ?: return
+        if (header.responseCode != CameraCommands.RESPONSE_OK) {
+            deferred.completeExceptionally(CameraProtocolException(header.responseCode))
+        } else {
+            deferred.complete(frame.copyOfRange(12, frame.size))
+        }
+    }
+
+    private fun send(payload: ByteArray) {
+        synchronized(sendLock) {
+            output.write(CameraFrame.encode(payload))
+            output.flush()
+        }
+    }
+
+    private fun failAll(error: Throwable) {
+        val snapshot = pending.values.toList()
+        pending.clear()
+        snapshot.forEach { it.completeExceptionally(error) }
+    }
+
+    override fun close() {
+        alive.set(false)
+        readerJob?.cancel()
+        keepAliveJob?.cancel()
+        runCatching { socket.close() }
+        failAll(IOException("camera connection closed"))
+    }
+
+    private companion object {
+        val SYNC = byteArrayOf(0x06, 0x00, 0x00) + "syNceNdinS".toByteArray()
+        val KEEPALIVE = byteArrayOf(0x05, 0x00, 0x00)
+    }
+}
