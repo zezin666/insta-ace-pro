@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.coil.compose)
     implementation(libs.datastore.preferences)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.protobuf.javalite)
 
     testImplementation(libs.junit)
