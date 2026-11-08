@@ -11,7 +11,10 @@ import java.nio.ByteBuffer
  * Decodes the camera's raw live preview stream (Annex-B H.264/H.265) onto a Surface.
  * Feed packets in order from [com.acegallery.session.CameraGateway.livePackets].
  */
-class LiveViewDecoder(private val surface: Surface) {
+class LiveViewDecoder(
+    private val surface: Surface,
+    private val onVideoSize: ((width: Int, height: Int) -> Unit)? = null,
+) {
 
     private var codec: MediaCodec? = null
     private var mime: String? = null
@@ -23,6 +26,7 @@ class LiveViewDecoder(private val surface: Surface) {
     private var hasVcl = false
     private var ptsUs = 0L
     private var released = false
+    private var reportedSize = false
 
     fun feed(packet: ByteArray) {
         if (released || packet.isEmpty()) return
@@ -101,9 +105,27 @@ class LiveViewDecoder(private val surface: Surface) {
         val info = MediaCodec.BufferInfo()
         while (true) {
             when (val index = c.dequeueOutputBuffer(info, 0)) {
-                in 0..Int.MAX_VALUE -> c.releaseOutputBuffer(index, true)
+                in 0..Int.MAX_VALUE -> {
+                    reportVideoSize(c)
+                    c.releaseOutputBuffer(index, true)
+                }
+
                 MediaCodec.INFO_TRY_AGAIN_LATER -> return
                 else -> return
+            }
+        }
+    }
+
+    /** Reads the decoder's real output size once; a format failure must never break decoding. */
+    private fun reportVideoSize(c: MediaCodec) {
+        if (reportedSize) return
+        runCatching {
+            val format = c.outputFormat
+            val width = format.getInteger(MediaFormat.KEY_WIDTH)
+            val height = format.getInteger(MediaFormat.KEY_HEIGHT)
+            if (width > 0 && height > 0) {
+                reportedSize = true
+                onVideoSize?.invoke(width, height)
             }
         }
     }

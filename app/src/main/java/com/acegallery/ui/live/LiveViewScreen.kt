@@ -99,7 +99,7 @@ fun LiveViewScreen(
 
     LaunchedEffect(surface) {
         val target = surface ?: return@LaunchedEffect
-        val decoder = LiveViewDecoder(target)
+        val decoder = LiveViewDecoder(target, onVideoSize = viewModel::onVideoSize)
         try {
             coroutineScope {
                 val collectJob = launch(Dispatchers.IO) {
