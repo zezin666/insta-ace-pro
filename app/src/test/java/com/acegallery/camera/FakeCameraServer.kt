@@ -22,6 +22,16 @@ class FakeCameraServer(
         return client
     }
 
+    fun sendNotification(code: Int, body: ByteArray) {
+        val socket = accepted ?: error("no client")
+        synchronized(socket) {
+            socket.getOutputStream().write(
+                CameraFrame.encode(MessageCodec.encodeHeader(code, 0) + body),
+            )
+            socket.getOutputStream().flush()
+        }
+    }
+
     private fun serve(socket: Socket) {
         val input = socket.getInputStream()
         val output = socket.getOutputStream()
