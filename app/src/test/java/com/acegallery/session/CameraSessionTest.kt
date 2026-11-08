@@ -104,17 +104,17 @@ class CameraSessionTest {
     }
 
     @Test
-    fun `live stream notification prefers visible crop size`() = runTest {
+    fun `live stream notification uses the stream resolution not the capture crop`() = runTest {
         val transport = RecordingTransport()
         val session = session(FakeFinder(FakeHandle), transport)
         session.connect()
-        // encoded 1280x720, visible crop 1920x1080
+        // stream 1280x720 (16:9); capture window 8064x6048 (4:3)
         transport.emitNotification(
             CameraCommands.NOTIFICATION_UPDATE_LIVE_STREAM_PARAMS,
-            bytes("10800a18d005201e320618800f20b808"),
+            bytes("10800a18d005201e320c08803f10a02f18803f20a02f"),
         )
-        assertEquals(1920, session.liveStreamParams.value?.width)
-        assertEquals(1080, session.liveStreamParams.value?.height)
+        assertEquals(1280, session.liveStreamParams.value?.width)
+        assertEquals(720, session.liveStreamParams.value?.height)
     }
 
     @Test

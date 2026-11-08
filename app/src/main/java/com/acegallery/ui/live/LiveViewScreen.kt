@@ -165,7 +165,9 @@ fun LiveViewScreen(
                     .padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                val params = state.liveParams ?: state.decodedParams
+                // Prefer the decoder's real frame size: a stale 8234 or a different
+                // capture window must never stretch the preview.
+                val params = state.decodedParams ?: state.liveParams
                 val ratio = if (params != null && params.width > 0 && params.height > 0) {
                     params.width.toFloat() / params.height
                 } else {

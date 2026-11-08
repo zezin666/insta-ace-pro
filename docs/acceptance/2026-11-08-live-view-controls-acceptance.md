@@ -60,3 +60,13 @@
 ### 条件任务
 
 Task 8（按拍摄比例请求 4:3/1:1 推流）：**未执行**。前提是「8234 恒为 16:9」；本次实测预览已是 4:3，前提不成立，且 8234 通知未能观察，无法据此决策。
+
+## 后续修正（2026-11-08，比例问题）
+
+真机日志显示：`8234` 中 `res_width/res_height=1280×720` 是实际推流尺寸，而 `window_crop_info`（`8064×6048`）是当前 **拍照尺寸**，并非推流可见尺寸。原实现优先使用 crop 比例（4:3），导致 16:9 画面被拉伸；验收时肉眼判断「约 4:3、未拉伸」不成立。
+
+修正：
+
+- 预览比例改用 `res_width/res_height`，并以解码器实际输出尺寸（`decodedParams`）优先，确保画面不拉伸。
+- 尝试请求 `RES_1280_960P30`（4:3）推流，相机仍返回 `1280×720`，确认**无法获得 4:3 实时流**；该限制已写入 README。
+- 相关测试：`CameraSessionTest > live stream notification uses the stream resolution not the capture crop`、`LiveViewViewModelTest > decoded size is recorded even when stream params exist`。

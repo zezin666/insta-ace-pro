@@ -63,6 +63,18 @@ class LiveViewViewModelTest {
     }
 
     @Test
+    fun `decoded size is recorded even when stream params exist`() = runTest {
+        val gateway = FakeGateway()
+        val vm = viewModel(gateway)
+        gateway.liveStreamParams.value = LiveStreamParams(1920, 1080, 30)
+        advanceUntilIdle()
+        vm.onVideoSize(1280, 720)
+        advanceUntilIdle()
+        assertEquals(1280, vm.state.value.decodedParams?.width)
+        assertEquals(720, vm.state.value.decodedParams?.height)
+    }
+
+    @Test
     fun `stop commands are delivered after the view model is cleared`() = runTest {
         val gateway = FakeGateway()
         val vm = viewModel(gateway)

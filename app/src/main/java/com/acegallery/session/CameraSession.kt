@@ -264,10 +264,12 @@ class CameraSession @Inject constructor(
                 val update = runCatching {
                     CameraProto.LiveStreamParamsUpdate.parseFrom(notification.body)
                 }.getOrNull() ?: return
-                val crop = update.windowCropInfo
-                val hasVisibleCrop = crop.dstWidth > 0 && crop.dstHeight > 0
-                val width = if (hasVisibleCrop) crop.dstWidth else update.resWidth
-                val height = if (hasVisibleCrop) crop.dstHeight else update.resHeight
+                // res_width/res_height is the actual stream size. window_crop_info on
+                // the Ace Pro reports the still capture window (e.g. 8064x6048 for a
+                // 4:3 photo) while the stream is always 16:9 — using the crop as the
+                // preview ratio stretches every frame.
+                val width = update.resWidth
+                val height = update.resHeight
                 if (width > 0 && height > 0) {
                     _liveStreamParams.value = LiveStreamParams(width, height, update.resFps)
                 }

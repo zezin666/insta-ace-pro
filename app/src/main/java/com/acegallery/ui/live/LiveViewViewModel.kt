@@ -157,10 +157,9 @@ class LiveViewViewModel @Inject constructor(
         }
     }
 
-    /** Decoder-reported size is a fallback; the camera's 8234 notification wins when present. */
+    /** The decoded frame size is authoritative for the preview box, so it never stretches. */
     fun onVideoSize(width: Int, height: Int) {
         if (width <= 0 || height <= 0) return
-        if (_state.value.liveParams != null) return
         _state.update { it.copy(decodedParams = LiveStreamParams(width, height, 0)) }
     }
 
