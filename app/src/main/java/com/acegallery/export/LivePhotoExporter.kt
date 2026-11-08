@@ -23,6 +23,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -52,8 +53,10 @@ class LivePhotoExporter(private val context: Context) {
         val clip = createClip(video, File(context.cacheDir, "live").apply { mkdirs() }, window)
         try {
             val cover = createCover(video, coverMsClamped * 1_000, window.startMs * 1_000)
-            val presentationUs = (coverMsClamped - window.startMs) * 1_000
-            val bytes = buildMotionPhoto(cover.first, cover.second, clip, presentationUs)
+            // Both the still and the XMP timestamp are relative to the clip's own
+            // timeline, which for the remux fallback starts at the first sync frame.
+            val presentationUs = (cover.timeUs - clip.timelineStartUs).coerceAtLeast(0L)
+            val bytes = buildMotionPhoto(cover.bitmap, cover.jpeg, clip.file, presentationUs)
             val base = file.name.substringBeforeLast('.')
             val photoBase = if (base.startsWith("VID_")) {
                 "MVIMG_" + base.removePrefix("VID_")
@@ -64,17 +67,29 @@ class LivePhotoExporter(private val context: Context) {
             }
             return save(bytes, "$photoBase.jpg")
         } finally {
-            clip.delete()
+            clip.file.delete()
         }
     }
 
-    private fun createCover(video: File, coverUs: Long, clipStartUs: Long): Pair<Bitmap, ByteArray> {
+    private data class CoverFrame(val bitmap: Bitmap, val jpeg: ByteArray, val timeUs: Long)
+
+    private data class ClipResult(val file: File, val timelineStartUs: Long)
+
+    private fun createCover(video: File, coverUs: Long, clipStartUs: Long): CoverFrame {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(video.absolutePath)
-            var frame = retriever.getFrameAtTime(coverUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: retriever.getFrameAtTime(clipStartUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: error("无法读取视频封面")
+            var requestedUs = coverUs
+            var frame = retriever.getFrameAtTime(requestedUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            if (frame == null) {
+                requestedUs = clipStartUs
+                frame = retriever.getFrameAtTime(requestedUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: error("无法读取视频封面")
+            }
+            // When the requested frame is unavailable the cover falls back to the
+            // clip's first frame; the XMP timestamp must then describe that frame,
+            // not the originally requested time.
+            val frameUs = requestedUs
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                 ?.toIntOrNull() ?: 0
             if (rotation != 0) {
@@ -95,17 +110,18 @@ class LivePhotoExporter(private val context: Context) {
                 frame.compress(Bitmap.CompressFormat.JPEG, 92, out)
                 out.toByteArray()
             }
-            return frame to jpeg
+            return CoverFrame(frame, jpeg, frameUs)
         } finally {
             retriever.release()
         }
     }
 
-    private suspend fun createClip(video: File, dir: File, clip: LiveClip): File {
+    private suspend fun createClip(video: File, dir: File, clip: LiveClip): ClipResult {
         val output = File(dir, "${video.nameWithoutExtension}_live.mp4")
         output.delete()
-        return runCatching { transcodeClip(video, output, clip) }
+        return runCatching { ClipResult(transcodeClip(video, output, clip), clip.startMs * 1_000) }
             .getOrElse { error ->
+                if (error is CancellationException) throw error
                 android.util.Log.w("LivePhoto", "Transformer failed; remuxing", error)
                 output.delete()
                 remuxClip(video, output, clip)
@@ -131,6 +147,7 @@ class LivePhotoExporter(private val context: Context) {
                         continuation.resumeWithException(exception)
                     }
                 })
+                continuation.invokeOnCancellation { transformer.cancel() }
                 val mediaItem = MediaItem.Builder()
                     .setUri(Uri.fromFile(video))
                     .setClippingConfiguration(
@@ -149,48 +166,61 @@ class LivePhotoExporter(private val context: Context) {
             output
         }
 
-    private fun remuxClip(video: File, output: File, clip: LiveClip): File {
+    private fun remuxClip(video: File, output: File, clip: LiveClip): ClipResult {
         val extractor = MediaExtractor()
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {
             extractor.setDataSource(video.absolutePath)
             val trackMap = mutableMapOf<Int, Int>()
+            val videoTracks = mutableSetOf<Int>()
             for (i in 0 until extractor.trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
                 if (mime.startsWith("video/") || mime.startsWith("audio/")) {
                     extractor.selectTrack(i)
                     trackMap[i] = muxer.addTrack(format)
+                    if (mime.startsWith("video/")) videoTracks += i
                 }
             }
-            if (trackMap.keys.none { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }) {
+            if (videoTracks.isEmpty()) {
                 error("视频里没有可用的视频轨")
             }
             if (clip.startMs > 0) {
                 extractor.seekTo(clip.startMs * 1_000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             }
+            // The remuxed clip starts at the sync frame the seek landed on, which can
+            // precede the requested window; the MP4 timeline is rebased to that frame
+            // so the XMP presentation timestamp stays relative to the clip.
+            val firstSampleUs = extractor.sampleTime
+            require(firstSampleUs >= 0) { "转码片段为空" }
+            val timelineStartUs = firstSampleUs.coerceAtLeast(0L)
             muxer.start()
             val buffer = ByteBuffer.allocate(8 * 1024 * 1024)
             val info = android.media.MediaCodec.BufferInfo()
             val endUs = clip.endMs * 1_000
+            var videoSamples = 0
             while (true) {
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
                 val time = extractor.sampleTime
                 if (time > endUs) break
-                val outTrack = trackMap[extractor.sampleTrackIndex]
+                val sourceTrack = extractor.sampleTrackIndex
+                val outTrack = trackMap[sourceTrack]
                 if (outTrack == null) {
                     extractor.advance()
                     continue
                 }
                 buffer.position(0)
                 buffer.limit(size)
-                info.set(0, size, time, extractor.sampleFlags)
+                info.set(0, size, (time - timelineStartUs).coerceAtLeast(0L), extractor.sampleFlags)
                 muxer.writeSampleData(outTrack, buffer, info)
+                if (sourceTrack in videoTracks) videoSamples++
                 extractor.advance()
             }
+            if (videoSamples == 0) error("转码片段为空")
             muxer.stop()
-            return output
+            require(output.exists() && output.length() > 0) { "转码片段为空" }
+            return ClipResult(output, timelineStartUs)
         } catch (exc: Exception) {
             output.delete()
             throw exc

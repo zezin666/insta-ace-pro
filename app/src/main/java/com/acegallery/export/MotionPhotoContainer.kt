@@ -84,8 +84,10 @@ object MotionPhotoContainer {
     }
 
     /** Appends the motion video after the JPEG's EOI. */
-    fun assemble(jpegWithSegments: ByteArray, video: ByteArray): ByteArray =
-        jpegWithSegments + video
+    fun assemble(jpegWithSegments: ByteArray, video: ByteArray): ByteArray {
+        require(video.isNotEmpty()) { "视频片段为空" }
+        return jpegWithSegments + video
+    }
 
     private val XMP_IDENTIFIER = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(Charsets.US_ASCII)
 

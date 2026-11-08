@@ -2,7 +2,7 @@
 
 日期：2026-11-08
 任务：Task 5 — 全量测试、真机验收与文档
-代码提交：`bb5ae0639182ba3a4c857b1b54ae00b474b48a99`（`feat: add live photo segment and cover editor`）
+代码提交：`bb5ae0639182ba3a4c857b1b54ae00b474b48a99`（`feat: add live photo segment and cover editor`），其后为审查修复提交（见 `git log c86e4ec..HEAD`）。
 
 ## 结论
 
@@ -15,10 +15,10 @@ JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 # BUILD SUCCESSFUL
 ```
 
-- 单元测试：23 个测试套件，**89 个测试，0 失败，0 错误，0 跳过**（`app/build/test-results/testDebugUnitTest/*.xml`，2026-11-08 14:48）。
+- 单元测试：23 个测试套件，**90 个测试，0 失败，0 错误，0 跳过**（`app/build/test-results/testDebugUnitTest/*.xml`，2026-11-08 15:07）。
 - 本次新增/相关测试：
   - `LivePhotoTimingTest`（5 个）：3 秒窗口、起点越界 clamp、短视频导出全长、封面 clamp、默认封面取中点。
-  - `MotionPhotoContainerTest`（4 个）：XMP 仅含 `GCamera`/`OpCamera`/`Container` 且无 `MiCamera`/`MicroVideo`；Exif UserComment 为 type 7 + `ASCII\0\0\0oplus_10485792`（124 字节）；`APP1 Exif → APP1 XMP` 插入顺序；MP4 追加。
+  - `MotionPhotoContainerTest`（5 个）：XMP 仅含 `GCamera`/`OpCamera`/`Container` 且无 `MiCamera`/`MicroVideo`；Exif UserComment 为 type 7 + `ASCII\0\0\0oplus_10485792`（124 字节）；`APP1 Exif → APP1 XMP` 插入顺序；MP4 追加；空视频被拒绝。
 - Debug 构建：`BUILD SUCCESSFUL`，APK `app/build/outputs/apk/debug/app-debug.apk`（39,683,256 字节，2026-11-08 14:47）。
 
 ## 安装

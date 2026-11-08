@@ -50,4 +50,9 @@ class MotionPhotoContainerTest {
         val video = byteArrayOf(1, 2, 3)
         assertArrayEquals(jpeg + video, MotionPhotoContainer.assemble(jpeg, video))
     }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `assemble rejects an empty video`() {
+        MotionPhotoContainer.assemble(byteArrayOf(0xFF.toByte(), 0xD9.toByte()), byteArrayOf())
+    }
 }

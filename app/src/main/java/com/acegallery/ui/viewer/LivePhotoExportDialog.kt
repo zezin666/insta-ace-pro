@@ -63,7 +63,9 @@ fun LivePhotoExportDialog(
     var clipStartMs by remember { mutableLongStateOf(0L) }
     var coverMs by remember { mutableLongStateOf(0L) }
     var rotation by remember { mutableIntStateOf(0) }
+    var metadataReady by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<Bitmap?>(null) }
+    var previewFailed by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -89,6 +91,7 @@ fun LivePhotoExportDialog(
         rotation = metadata.second
         clipStartMs = 0L
         coverMs = LivePhotoTiming.defaultCover(LivePhotoTiming.clip(metadata.first, 0L))
+        metadataReady = true
     }
 
     val clip = LivePhotoTiming.clip(durationMs, clipStartMs)
@@ -97,17 +100,21 @@ fun LivePhotoExportDialog(
     val coverRange = clip.endMs - clip.startMs
     val shortVideo = durationMs in 1L..(LivePhotoTiming.MAX_CLIP_MS - 1)
 
-    LaunchedEffect(cover, source, rotation) {
+    LaunchedEffect(cover, source, rotation, durationMs) {
         if (durationMs <= 0L) return@LaunchedEffect
         delay(120)
         preview = withContext(Dispatchers.IO) {
             MediaMetadataRetriever().let { retriever ->
                 try {
                     retriever.setDataSource(source.absolutePath)
-                    retriever.getFrameAtTime(
+                    val raw = retriever.getFrameAtTime(
                         cover * 1_000,
                         MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                    )?.let { frame ->
+                    ) ?: retriever.getFrameAtTime(
+                        clip.startMs * 1_000,
+                        MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    )
+                    raw?.let { frame ->
                         val oriented = if (rotation != 0) {
                             val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
                             Bitmap.createBitmap(
@@ -133,6 +140,7 @@ fun LivePhotoExportDialog(
                 }
             }
         }
+        previewFailed = preview == null
     }
 
     Dialog(
@@ -155,14 +163,26 @@ fun LivePhotoExportDialog(
                         .padding(vertical = 16.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    preview?.let {
-                        Image(
-                            bitmap = it.asImageBitmap(),
+                    val bitmap = preview
+                    when {
+                        bitmap != null -> Image(
+                            bitmap = bitmap.asImageBitmap(),
                             contentDescription = "封面预览",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
                         )
-                    } ?: CircularProgressIndicator()
+                        metadataReady && durationMs <= 0L -> Text(
+                            text = "无法读取视频时长",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        previewFailed -> Text(
+                            text = "无法读取封面帧",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        else -> CircularProgressIndicator()
+                    }
                 }
 
                 Text(
