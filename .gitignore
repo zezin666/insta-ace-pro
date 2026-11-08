@@ -12,3 +12,7 @@ tools/probe/__pycache__/
 .kotlin/
 captures/
 docs/protocol/sample.bin
+
+# signing material
+*.jks
+*.keystore

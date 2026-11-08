@@ -55,7 +55,25 @@
 sdk.dir=D:\\Android\\Sdk
 ```
 
-2. 构建 Debug APK：
+2. 构建 Release APK（需要使用你自己的签名密钥，见下）：
+
+```bash
+./gradlew :app:assembleRelease
+# 产物：app/build/outputs/apk/release/app-release.apk
+```
+
+Release 签名从 gitignored 的 `local.properties` 读取（或同名环境变量）：
+
+```properties
+acegallery.release.store=C:/path/to/your-release.jks
+acegallery.release.storePassword=****
+acegallery.release.keyAlias=your-alias
+acegallery.release.keyPassword=****
+```
+
+未配置时 `assembleRelease` 仍会产出未签名的 APK。签名密钥请自行备份；更换密钥后无法覆盖安装旧版本。
+
+3. 构建 Debug APK（开发调试）：
 
 ```bash
 ./gradlew :app:assembleDebug
@@ -63,9 +81,9 @@ sdk.dir=D:\\Android\\Sdk
 ```
 
 > Windows 下若默认 `JAVA_HOME` 指向 Java 8，需要显式指定 JDK 17：
-> `JAVA_HOME=/d/JDK17 ./gradlew :app:assembleDebug`
+> `JAVA_HOME=/d/JDK17 ./gradlew :app:assembleRelease`
 
-3. 运行 JVM 单元测试：
+4. 运行 JVM 单元测试：
 
 ```bash
 ./gradlew :app:testDebugUnitTest
@@ -75,7 +93,8 @@ sdk.dir=D:\\Android\\Sdk
 ## 安装与使用
 
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/release/app-release.apk
+# 开发调试包：app/build/outputs/apk/debug/app-debug.apk
 ```
 
 1. 打开相机 Wi-Fi，手机连接相机的热点（SSID 形如 `Ace Pro XXXXXX.OSC`）。
@@ -83,14 +102,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 3. **下载**：长按或点选多个文件 → 「下载所选」。
 4. **水印导出**：打开照片 → 底部「导出」→ 选择水印位置 → 导出。
 5. **Live 图**：打开视频 → 右上「LIVE」→ 调整片段起点与封面 → 导出。
-6. **实时画面**：底部「实时画面」→ 预览；「拍照」/「录制」会自动切换相机模式。
+6. **实时画面**：底部「实时画面」→ 预览；「拍照」/「录制」直接使用相机当前模式。
 
 下载的原片与导出副本都写入 `DCIM/Insta360/`。同名导出由系统相册自动追加 ` (1)`、` (2)` 后缀。
 
 ## 技术架构
 
 ### 双通道传输
-- **TCP 6666**：自定义帧（`u32 LE 总长度 + protobuf`）协议，负责文件列表（命令 13）、相机缩略图（命令 11）、实时取景与拍照/录制（命令 1–5）、相机模式切换（命令 54/55）。
+- **TCP 6666**：自定义帧（`u32 LE 总长度 + protobuf`）协议，负责文件列表（命令 13）、相机缩略图（命令 11）、实时取景与拍照/录制（命令 1–5）、相机模式/推流参数查询（命令 54/55、通知 8211/8234）。
 - **HTTP 80**：文件大小、Range 断点下载、预览与 ExoPlayer 流播放；相机不提供目录列表，仅 TCP 协议可列文件。
 
 ### 关键设计
@@ -147,6 +166,7 @@ tools/probe/                      # 只读协议探测脚本（Python）
 
 ## 版本历史
 
+- `v1.3.2`：移除首页废弃入口、新增「关于」页；拍照/录制改为直接使用相机当前模式；修复实时预览被拉伸的问题（按真实推流比例显示）；Release 使用正式签名。
 - `v1.3.1`：新增自适应应用图标（含单色主题图标）；APK 版本号更新为 1.3.1。
 - `v1.3.0`：水印导出编辑器、Live 图片段/封面编辑器、实时画面模式切换与拍照/录制、ColorOS 16 真机验收。
 - `v1.2.0`：官方导出与水印调研、功能范围文档。

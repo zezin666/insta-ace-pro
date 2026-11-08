@@ -1,4 +1,5 @@
 import com.google.protobuf.gradle.id
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -10,6 +11,16 @@ plugins {
     alias(libs.plugins.protobuf)
 }
 
+// Release signing is read from the gitignored local.properties (or the same-named
+// environment variables); without it assembleRelease produces an unsigned APK.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingProperty(name: String): String? =
+    localProperties.getProperty(name) ?: System.getenv(name)
+
 android {
     namespace = "com.acegallery"
     compileSdk = 35
@@ -18,9 +29,21 @@ android {
         applicationId = "com.acegallery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.3.1"
+        versionCode = 3
+        versionName = "1.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        val storePath = signingProperty("acegallery.release.store")
+        if (storePath != null) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = signingProperty("acegallery.release.storePassword")
+                keyAlias = signingProperty("acegallery.release.keyAlias")
+                keyPassword = signingProperty("acegallery.release.keyPassword")
+            }
+        }
     }
 
     buildTypes {
@@ -30,6 +53,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
