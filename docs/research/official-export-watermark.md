@@ -50,9 +50,14 @@ SOI → APP1 XMP → APP1 Exif(OPPO 标记) → JPEG 图像 → EOI → MP4
 - 流包为 12 字节头 + Annex-B H.264/H.265；实测 Ace Pro 1 为 H.264，MediaCodec 渲染正常。
 - 已验证：预览出画面、拍照后相机文件数 +1、录制开始/停止返回成功。
 
+### 2.4 徕卡 Logo 素材
+
+- `app/src/main/res/drawable-nodpi/leica_logo.png`：512×512 透明 PNG。由用户提供的官方水印参考图 `docs/superpowers/specs/assets/2026-11-08-official-watermark-reference.png` 裁剪，经圆形 Alpha 蒙版与高质量放大生成，四角完全透明。
+- 该素材仅用于本 App（个人侧载使用，包名 `com.acegallery`），不对外分发。
+
 ## 3. 已知限制 / 后续
 
 - 本机 MIUI（Redmi K40）相册未显示第三方 Live 图的「动态照片」标记；文件结构符合 MIUI 识别规范，较新 HyperOS / ColorOS 待实测。微信分享入口已确认可用。
 - 视频水印导出（重编码并叠加动态水印）尚未实现；当前「导出」覆盖照片水印与视频→Live 图。
-- 官方水印使用其品牌素材与样式；本实现使用文字水印「Insta360 Ace Pro」，未内置官方 Logo 资源。
+- 官方水印使用其品牌素材与样式；本实现使用文字水印「Insta360 Ace Pro」，并内置裁剪自官方参考图的徕卡 Logo（见 2.4）。
 - 录制是否落盘取决于相机当前拍照/录像模式；实时画面页提供基础拍照与录制按钮。
