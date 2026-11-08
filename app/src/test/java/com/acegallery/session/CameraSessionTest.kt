@@ -104,6 +104,7 @@ class CameraSessionTest {
         session.connect()
         val error = runCatching { session.setCaptureMode(CaptureMode.PHOTO) }.exceptionOrNull()
         assertTrue(error is CameraProtocolTimeoutException)
+        assertTrue(error?.message?.contains("无法切换相机模式") == true)
         assertTrue(session.state.value is CameraState.Connected)
         assertEquals(CaptureMode.UNKNOWN, session.captureMode.value)
     }

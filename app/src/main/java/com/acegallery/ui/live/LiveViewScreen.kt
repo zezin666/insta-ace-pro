@@ -174,7 +174,11 @@ fun LiveViewScreen(
                 } else {
                     16f / 9f
                 }
-                val size = previewSize(maxWidth.value, maxHeight.value * 0.55f, ratio)
+                val size = previewSize(
+                    maxWidth = maxWidth.value,
+                    maxHeight = previewHeightBudget(maxWidth.value, maxHeight.value),
+                    aspectRatio = ratio,
+                )
                 Box(
                     modifier = Modifier
                         .width(size.width.dp)

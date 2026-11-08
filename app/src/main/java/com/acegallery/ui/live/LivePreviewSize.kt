@@ -14,3 +14,12 @@ fun previewSize(maxWidth: Float, maxHeight: Float, aspectRatio: Float): PreviewS
     val height = min(maxHeight, maxWidth / ratio)
     return PreviewSize(width = height * ratio, height = height)
 }
+
+/**
+ * Portrait keeps the preview to 55% of the space above the controls; landscape uses
+ * all of it, otherwise the available height shrinks the preview to a thumbnail.
+ */
+fun previewHeightBudget(maxWidth: Float, maxHeight: Float): Float =
+    if (maxWidth > maxHeight) maxHeight else maxHeight * PORTRAIT_HEIGHT_FRACTION
+
+private const val PORTRAIT_HEIGHT_FRACTION = 0.55f

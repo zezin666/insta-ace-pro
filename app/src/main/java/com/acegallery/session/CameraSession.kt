@@ -2,6 +2,8 @@ package com.acegallery.session
 
 import com.acegallery.camera.CameraCommands
 import com.acegallery.camera.CameraNotification
+import com.acegallery.camera.CameraProtocolException
+import com.acegallery.camera.CameraProtocolTimeoutException
 import com.acegallery.camera.CameraTransport
 import com.acegallery.model.CameraFile
 import com.acegallery.network.CameraFileSource
@@ -218,12 +220,21 @@ class CameraSession @Inject constructor(
         val request = CameraProto.SetSyncCaptureMode.newBuilder()
             .setCaptureMode(protoMode)
             .build()
-        transport().request(
-            CameraCommands.SET_SYNC_CAPTURE_MODE,
-            request.toByteArray(),
-            timeoutMs = 5_000,
-            fatalOnTimeout = false,
-        )
+        try {
+            transport().request(
+                CameraCommands.SET_SYNC_CAPTURE_MODE,
+                request.toByteArray(),
+                timeoutMs = 5_000,
+                fatalOnTimeout = false,
+            )
+        } catch (error: CameraProtocolException) {
+            throw CameraProtocolException(
+                error.responseCode,
+                "无法切换相机模式（相机返回 ${error.responseCode}）",
+            )
+        } catch (_: CameraProtocolTimeoutException) {
+            throw CameraProtocolTimeoutException("无法切换相机模式（相机无响应）")
+        }
         _captureMode.value = mode
         delay(MODE_SETTLE_MS)
     }
