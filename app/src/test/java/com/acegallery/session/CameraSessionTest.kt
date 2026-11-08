@@ -3,6 +3,7 @@ package com.acegallery.session
 import com.acegallery.bytes
 import com.acegallery.camera.CameraCommands
 import com.acegallery.camera.CameraNotification
+import com.acegallery.camera.CameraProtocolException
 import com.acegallery.camera.CameraProtocolTimeoutException
 import com.acegallery.camera.CameraTransport
 import com.acegallery.network.CameraNetworkFinder
@@ -123,6 +124,32 @@ class CameraSessionTest {
         assertEquals(1080, session.liveStreamParams.value?.height)
     }
 
+    @Test
+    fun `mode switch rejection prevents the capture command`() = runTest {
+        val transport = RecordingTransport(failModeSwitchWith = 400)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        val error = runCatching { session.takePicture() }.exceptionOrNull()
+        assertTrue(error is CameraProtocolException)
+        assertTrue(error?.message?.contains("无法切换相机模式") == true)
+        assertTrue(CameraCommands.TAKE_PICTURE !in transport.commands)
+        assertTrue(session.state.value is CameraState.Connected)
+    }
+
+    @Test
+    fun `live stream notification falls back to encoded size`() = runTest {
+        val transport = RecordingTransport()
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        // no window_crop_info: 1280x720 encoded size only
+        transport.emitNotification(
+            CameraCommands.NOTIFICATION_UPDATE_LIVE_STREAM_PARAMS,
+            bytes("10800a18d005201e"),
+        )
+        assertEquals(1280, session.liveStreamParams.value?.width)
+        assertEquals(720, session.liveStreamParams.value?.height)
+    }
+
     private fun session(
         finder: CameraNetworkFinder,
         transport: CameraTransport = FakeTransport(),
@@ -173,6 +200,7 @@ class CameraSessionTest {
             CameraProto.SyncCaptureMode.SYNC_MODE_UNKNOWN,
         private val failModeQuery: Boolean = false,
         private val failModeSwitch: Boolean = false,
+        private val failModeSwitchWith: Int? = null,
     ) : CameraTransport {
         val commands = mutableListOf<Int>()
         private val _notifications = MutableSharedFlow<CameraNotification>(extraBufferCapacity = 8)
@@ -206,6 +234,7 @@ class CameraSessionTest {
                 }
 
                 CameraCommands.SET_SYNC_CAPTURE_MODE -> {
+                    failModeSwitchWith?.let { throw CameraProtocolException(it) }
                     if (failModeSwitch) throw CameraProtocolTimeoutException("mode switch timed out")
                     ByteArray(0)
                 }

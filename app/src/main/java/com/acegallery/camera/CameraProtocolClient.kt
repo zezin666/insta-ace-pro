@@ -121,18 +121,18 @@ class CameraProtocolClient(
     private fun handleMessage(frame: ByteArray) {
         if (frame.size < 12) return
         val header = MessageCodec.parseHeader(frame)
-        val deferred = pending.remove(header.seq)
-        if (deferred == null) {
-            if (header.responseCode >= NOTIFICATION_MIN) {
-                _notifications.tryEmit(
-                    CameraNotification(
-                        code = header.responseCode,
-                        body = frame.copyOfRange(12, frame.size),
-                    ),
-                )
-            }
+        // Notifications use the same seq field as requests; they are never responses,
+        // so check the code before consuming a pending sequence.
+        if (header.responseCode >= NOTIFICATION_MIN) {
+            _notifications.tryEmit(
+                CameraNotification(
+                    code = header.responseCode,
+                    body = frame.copyOfRange(12, frame.size),
+                ),
+            )
             return
         }
+        val deferred = pending.remove(header.seq) ?: return
         if (header.responseCode != CameraCommands.RESPONSE_OK) {
             deferred.completeExceptionally(CameraProtocolException(header.responseCode))
         } else {

@@ -12,10 +12,8 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,7 +46,7 @@ class LiveViewViewModel @Inject constructor(
     val state: StateFlow<UiState> = _state.asStateFlow()
     val packets: Flow<ByteArray> get() = session.livePackets
 
-    private val stopScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val stopScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private val lastPacketAt = AtomicLong(0L)
     @Volatile private var restarted = false
     @Volatile private var restartedAt = 0L
@@ -169,9 +167,10 @@ class LiveViewViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        // Do not cancel stopScope: stop() queues the camera's stop commands there, and
+        // cancelling before they run would leave the camera recording after the user leaves.
         watchdogJob?.cancel()
         watchdogJob = null
-        stopScope.cancel()
         super.onCleared()
     }
 

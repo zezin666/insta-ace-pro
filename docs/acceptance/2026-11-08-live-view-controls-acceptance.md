@@ -6,9 +6,9 @@
 
 ## 自动化结果
 
-- `JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest`：105 个 JVM 测试全部通过。
+- `JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest`：111 个 JVM 测试全部通过。
 - `JAVA_HOME=/d/JDK17 ./gradlew :app:assembleDebug`：成功。
-- 新增测试：`CameraModeProtoTest`（3）、`CameraProtocolClientTest`（5）、`CameraSessionTest`（9）、`LiveViewViewModelTest`（3）、`LivePreviewSizeTest`（5）、`LiveStreamWatchdogTest`（4）。
+- 测试类（总数）：`CameraModeProtoTest`（3）、`CameraProtocolClientTest`（6）、`CameraSessionTest`（11）、`LiveViewViewModelTest`（4）、`LivePreviewSizeTest`（5）、`LiveStreamWatchdogTest`（4）。
 
 ## 真机环境
 

@@ -62,11 +62,31 @@ class LiveViewViewModelTest {
         assertEquals(1920, vm.state.value.liveParams?.width)
     }
 
+    @Test
+    fun `stop commands are delivered after the view model is cleared`() = runTest {
+        val gateway = FakeGateway()
+        val vm = viewModel(gateway)
+        vm.start()
+        advanceUntilIdle()
+        vm.stop()
+        clear(vm)
+        advanceUntilIdle()
+        assertEquals(1, gateway.stopRecordingCalls)
+        assertEquals(1, gateway.stopLiveStreamCalls)
+    }
+
     private fun viewModel(gateway: FakeGateway): LiveViewViewModel = LiveViewViewModel(
         session = gateway,
         hostProvider = CameraHostProvider { "192.168.42.1" },
         ioDispatcher = mainDispatcherRule.dispatcher,
     )
+
+    private fun clear(vm: LiveViewViewModel) {
+        LiveViewViewModel::class.java
+            .getDeclaredMethod("onCleared")
+            .apply { isAccessible = true }
+            .invoke(vm)
+    }
 
     private fun advanceUntilIdle() {
         mainDispatcherRule.dispatcher.scheduler.advanceUntilIdle()
@@ -81,6 +101,10 @@ class LiveViewViewModelTest {
         var takePictureCalls = 0
             private set
         var startRecordingCalls = 0
+            private set
+        var stopRecordingCalls = 0
+            private set
+        var stopLiveStreamCalls = 0
             private set
         private val takePictureGate = CompletableDeferred<Unit>()
 
@@ -103,6 +127,14 @@ class LiveViewViewModelTest {
 
         override suspend fun startRecording() {
             startRecordingCalls++
+        }
+
+        override suspend fun stopRecording() {
+            stopRecordingCalls++
+        }
+
+        override suspend fun stopLiveStream() {
+            stopLiveStreamCalls++
         }
 
         fun releaseTakePicture() {
