@@ -40,13 +40,17 @@ class LivePhotoExporter(private val context: Context) {
     suspend fun export(
         video: File,
         file: CameraFile,
-        startMs: Long = 0L,
-        coverMs: Long = 1_500L,
+        durationMs: Long,
+        startMs: Long,
+        coverMs: Long,
     ): Uri {
-        val clip = createClip(video, File(context.cacheDir, "live").apply { mkdirs() }, startMs)
+        val window = LivePhotoTiming.clip(durationMs, startMs)
+        require(window.durationMs > 0) { "视频时长无效" }
+        val coverMsClamped = LivePhotoTiming.clampCover(window, coverMs)
+        val clip = createClip(video, File(context.cacheDir, "live").apply { mkdirs() }, window)
         try {
-            val cover = createCover(video, coverMs * 1_000)
-            val presentationUs = (coverMs - startMs).coerceAtLeast(0L) * 1_000
+            val cover = createCover(video, coverMsClamped * 1_000, window.startMs * 1_000)
+            val presentationUs = (coverMsClamped - window.startMs) * 1_000
             val bytes = buildMotionPhoto(cover.first, cover.second, clip, presentationUs)
             val base = file.name.substringBeforeLast('.')
             val photoBase = if (base.startsWith("VID_")) {
@@ -62,12 +66,12 @@ class LivePhotoExporter(private val context: Context) {
         }
     }
 
-    private fun createCover(video: File, coverUs: Long): Pair<Bitmap, ByteArray> {
+    private fun createCover(video: File, coverUs: Long, clipStartUs: Long): Pair<Bitmap, ByteArray> {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(video.absolutePath)
             var frame = retriever.getFrameAtTime(coverUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime(clipStartUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: error("无法读取视频封面")
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                 ?.toIntOrNull() ?: 0
@@ -95,18 +99,18 @@ class LivePhotoExporter(private val context: Context) {
         }
     }
 
-    private suspend fun createClip(video: File, dir: File, startMs: Long): File {
+    private suspend fun createClip(video: File, dir: File, clip: LiveClip): File {
         val output = File(dir, "${video.nameWithoutExtension}_live.mp4")
         output.delete()
-        return runCatching { transcodeClip(video, output, startMs) }
+        return runCatching { transcodeClip(video, output, clip) }
             .getOrElse { error ->
                 android.util.Log.w("LivePhoto", "Transformer failed; remuxing", error)
                 output.delete()
-                remuxClip(video, output, startMs)
+                remuxClip(video, output, clip)
             }
     }
 
-    private suspend fun transcodeClip(video: File, output: File, startMs: Long): File =
+    private suspend fun transcodeClip(video: File, output: File, clip: LiveClip): File =
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { continuation ->
                 val transformer = Transformer.Builder(context)
@@ -129,8 +133,8 @@ class LivePhotoExporter(private val context: Context) {
                     .setUri(Uri.fromFile(video))
                     .setClippingConfiguration(
                         MediaItem.ClippingConfiguration.Builder()
-                            .setStartPositionMs(startMs)
-                            .setEndPositionMs(startMs + 3_000)
+                            .setStartPositionMs(clip.startMs)
+                            .setEndPositionMs(clip.endMs)
                             .build(),
                     )
                     .build()
@@ -143,7 +147,7 @@ class LivePhotoExporter(private val context: Context) {
             output
         }
 
-    private fun remuxClip(video: File, output: File, startMs: Long): File {
+    private fun remuxClip(video: File, output: File, clip: LiveClip): File {
         val extractor = MediaExtractor()
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {
@@ -160,13 +164,13 @@ class LivePhotoExporter(private val context: Context) {
             if (trackMap.keys.none { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }) {
                 error("视频里没有可用的视频轨")
             }
-            if (startMs > 0) {
-                extractor.seekTo(startMs * 1_000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            if (clip.startMs > 0) {
+                extractor.seekTo(clip.startMs * 1_000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             }
             muxer.start()
             val buffer = ByteBuffer.allocate(8 * 1024 * 1024)
             val info = android.media.MediaCodec.BufferInfo()
-            val endUs = startMs * 1_000 + CLIP_US
+            val endUs = clip.endMs * 1_000
             while (true) {
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
@@ -313,7 +317,6 @@ class LivePhotoExporter(private val context: Context) {
         ByteArray(length / 2) { index -> substring(index * 2, index * 2 + 2).toInt(16).toByte() }
 
     private companion object {
-        const val CLIP_US = 3_000_000L
         val XMP_IDENTIFIER = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(Charsets.US_ASCII)
 
         // 124-byte Exif with UserComment (type 7) = "ASCII\0\0\0" + "oplus_10485792".

@@ -148,7 +148,7 @@ fun LivePhotoExportDialog(
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
-                                exporter.export(source, file, startMs, coverMs)
+                                exporter.export(source, file, durationMs, startMs, coverMs)
                             }
                         }.onSuccess {
                             onExported()
