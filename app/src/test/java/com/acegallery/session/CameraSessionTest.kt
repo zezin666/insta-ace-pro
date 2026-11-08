@@ -1,5 +1,9 @@
 package com.acegallery.session
 
+import com.acegallery.bytes
+import com.acegallery.camera.CameraCommands
+import com.acegallery.camera.CameraNotification
+import com.acegallery.camera.CameraProtocolTimeoutException
 import com.acegallery.camera.CameraTransport
 import com.acegallery.network.CameraNetworkFinder
 import com.acegallery.network.CameraNetworkHandle
@@ -8,6 +12,8 @@ import java.net.Socket
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -55,6 +61,67 @@ class CameraSessionTest {
         assertTrue(session.state.value is CameraState.Connected)
     }
 
+    @Test
+    fun `take picture switches to photo mode first`() = runTest {
+        val transport = RecordingTransport(initialMode = CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_VIDEO)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        session.takePicture()
+        assertEquals(
+            listOf(
+                CameraCommands.GET_SYNC_CAPTURE_MODE,
+                CameraCommands.SET_SYNC_CAPTURE_MODE,
+                CameraCommands.TAKE_PICTURE,
+            ),
+            transport.commands.filter { it in setOf(55, 54, 3) },
+        )
+        assertEquals(CaptureMode.PHOTO, session.captureMode.value)
+    }
+
+    @Test
+    fun `start recording switches to video mode first`() = runTest {
+        val transport = RecordingTransport(initialMode = CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_IMAGE)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        session.startRecording()
+        assertEquals(CaptureMode.VIDEO, session.captureMode.value)
+        assertTrue(CameraCommands.START_CAPTURE in transport.commands)
+    }
+
+    @Test
+    fun `mode query timeout keeps session connected`() = runTest {
+        val transport = RecordingTransport(failModeQuery = true)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        assertTrue(session.state.value is CameraState.Connected)
+        assertEquals(CaptureMode.UNKNOWN, session.captureMode.value)
+    }
+
+    @Test
+    fun `mode switch timeout keeps session connected and mode unchanged`() = runTest {
+        val transport = RecordingTransport(failModeSwitch = true)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        val error = runCatching { session.setCaptureMode(CaptureMode.PHOTO) }.exceptionOrNull()
+        assertTrue(error is CameraProtocolTimeoutException)
+        assertTrue(session.state.value is CameraState.Connected)
+        assertEquals(CaptureMode.UNKNOWN, session.captureMode.value)
+    }
+
+    @Test
+    fun `live stream notification prefers visible crop size`() = runTest {
+        val transport = RecordingTransport()
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        // encoded 1280x720, visible crop 1920x1080
+        transport.emitNotification(
+            CameraCommands.NOTIFICATION_UPDATE_LIVE_STREAM_PARAMS,
+            bytes("10800a18d005201e320618800f20b808"),
+        )
+        assertEquals(1920, session.liveStreamParams.value?.width)
+        assertEquals(1080, session.liveStreamParams.value?.height)
+    }
+
     private fun session(
         finder: CameraNetworkFinder,
         transport: CameraTransport = FakeTransport(),
@@ -94,6 +161,63 @@ class CameraSessionTest {
                 .setTotalCount(1)
                 .build()
                 .toByteArray()
+
+        override fun close() {
+            alive = false
+        }
+    }
+
+    private class RecordingTransport(
+        private val initialMode: CameraProto.SyncCaptureMode =
+            CameraProto.SyncCaptureMode.SYNC_MODE_UNKNOWN,
+        private val failModeQuery: Boolean = false,
+        private val failModeSwitch: Boolean = false,
+    ) : CameraTransport {
+        val commands = mutableListOf<Int>()
+        private val _notifications = MutableSharedFlow<CameraNotification>(extraBufferCapacity = 8)
+        override val notifications: Flow<CameraNotification> = _notifications
+        private var alive = true
+
+        override fun start() {
+            alive = true
+        }
+
+        override fun isAlive(): Boolean = alive
+
+        fun emitNotification(code: Int, body: ByteArray) {
+            _notifications.tryEmit(CameraNotification(code, body))
+        }
+
+        override fun request(
+            command: Int,
+            payload: ByteArray,
+            timeoutMs: Long,
+            fatalOnTimeout: Boolean,
+        ): ByteArray {
+            commands += command
+            return when (command) {
+                CameraCommands.GET_SYNC_CAPTURE_MODE -> {
+                    if (failModeQuery) throw CameraProtocolTimeoutException("mode query timed out")
+                    CameraProto.GetSyncCaptureModeResp.newBuilder()
+                        .setCaptureMode(initialMode)
+                        .build()
+                        .toByteArray()
+                }
+
+                CameraCommands.SET_SYNC_CAPTURE_MODE -> {
+                    if (failModeSwitch) throw CameraProtocolTimeoutException("mode switch timed out")
+                    ByteArray(0)
+                }
+
+                CameraCommands.GET_FILE_LIST -> CameraProto.GetFileListResp.newBuilder()
+                    .addUri("/DCIM/a.mp4")
+                    .setTotalCount(1)
+                    .build()
+                    .toByteArray()
+
+                else -> ByteArray(0)
+            }
+        }
 
         override fun close() {
             alive = false
