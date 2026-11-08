@@ -8,16 +8,21 @@ import com.acegallery.session.CaptureMode
 import com.acegallery.session.LiveStreamParams
 import com.acegallery.settings.CameraHostProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -44,6 +49,10 @@ class LiveViewViewModel @Inject constructor(
     val packets: Flow<ByteArray> get() = session.livePackets
 
     private val stopScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lastPacketAt = AtomicLong(0L)
+    @Volatile private var restarted = false
+    @Volatile private var restartedAt = 0L
+    private var watchdogJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -56,6 +65,22 @@ class LiveViewViewModel @Inject constructor(
                 _state.update { it.copy(liveParams = params) }
             }
         }
+        viewModelScope.launch {
+            session.livePackets.collect {
+                lastPacketAt.set(nowMs())
+                if (restarted) {
+                    restarted = false
+                    restartedAt = 0L
+                    _state.update { current ->
+                        if (current.message == RECOVERING_MESSAGE) {
+                            current.copy(message = null)
+                        } else {
+                            current
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun start() {
@@ -66,7 +91,9 @@ class LiveViewViewModel @Inject constructor(
                     session.connect(hostProvider.host())
                     session.startLiveStream()
                 }
+                lastPacketAt.set(nowMs())
                 _state.update { it.copy(busy = false, streaming = true) }
+                startWatchdog()
             } catch (exc: Exception) {
                 _state.update {
                     it.copy(
@@ -80,6 +107,10 @@ class LiveViewViewModel @Inject constructor(
     }
 
     fun stop() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        restarted = false
+        restartedAt = 0L
         stopScope.launch {
             runCatching { session.stopRecording() }
             runCatching { session.stopLiveStream() }
@@ -135,5 +166,58 @@ class LiveViewViewModel @Inject constructor(
         if (width <= 0 || height <= 0) return
         if (_state.value.liveParams != null) return
         _state.update { it.copy(decodedParams = LiveStreamParams(width, height, 0)) }
+    }
+
+    override fun onCleared() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        stopScope.cancel()
+        super.onCleared()
+    }
+
+    /**
+     * Runs on a real IO scope on purpose: the loop delays forever, and on the test
+     * dispatcher it would make advanceUntilIdle never finish.
+     */
+    private fun startWatchdog() {
+        if (watchdogJob?.isActive == true) return
+        watchdogJob = stopScope.launch {
+            while (isActive) {
+                delay(WATCHDOG_TICK_MS)
+                if (!_state.value.streaming) continue
+                val now = nowMs()
+                if (restarted && lastPacketAt.get() >= restartedAt) {
+                    restarted = false
+                    restartedAt = 0L
+                    continue
+                }
+                when {
+                    !restarted &&
+                        shouldRestartLive(true, now, lastPacketAt.get(), false) -> {
+                        restarted = true
+                        restartedAt = now
+                        _state.update { it.copy(message = RECOVERING_MESSAGE) }
+                        runCatching { session.startLiveStream() }
+                            .onFailure {
+                                _state.update { state -> state.copy(message = EXIT_MESSAGE) }
+                            }
+                    }
+
+                    restarted && now - restartedAt >= WATCHDOG_GRACE_MS -> {
+                        _state.update { it.copy(message = EXIT_MESSAGE) }
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    private fun nowMs(): Long = System.currentTimeMillis()
+
+    private companion object {
+        const val WATCHDOG_TICK_MS = 250L
+        const val WATCHDOG_GRACE_MS = 2_000L
+        const val RECOVERING_MESSAGE = "画面中断，正在恢复…"
+        const val EXIT_MESSAGE = "画面中断，请退出重进"
     }
 }
