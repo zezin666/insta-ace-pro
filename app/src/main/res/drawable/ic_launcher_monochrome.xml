@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Ring -->
+    <path
+        android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:fillColor="#00000000" />
+
+    <!-- Diaphragm disc with a hexagonal opening -->
+    <path
+        android:fillType="evenOdd"
+        android:fillColor="#FFFFFF"
+        android:pathData="M29,54 a25,25 0 1,0 50,0 a25,25 0 1,0 -50,0 M65,54 L59.5,63.53 L48.5,63.53 L43,54 L48.5,44.47 L59.5,44.47 Z" />
+</vector>
