@@ -62,7 +62,12 @@ class CameraProtocolClient(
 
     override fun isAlive(): Boolean = alive.get()
 
-    override fun request(command: Int, payload: ByteArray, timeoutMs: Long): ByteArray {
+    override fun request(
+        command: Int,
+        payload: ByteArray,
+        timeoutMs: Long,
+        fatalOnTimeout: Boolean,
+    ): ByteArray {
         if (!alive.get()) throw IOException("camera connection is closed")
         val sequence = nextSeq.getAndUpdate { (it + 1) and 0xFFFFFF }
         val deferred = CompletableDeferred<ByteArray>()

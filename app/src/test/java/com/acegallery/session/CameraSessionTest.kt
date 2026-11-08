@@ -83,7 +83,12 @@ class CameraSessionTest {
 
         override fun isAlive(): Boolean = alive
 
-        override fun request(command: Int, payload: ByteArray, timeoutMs: Long): ByteArray =
+        override fun request(
+            command: Int,
+            payload: ByteArray,
+            timeoutMs: Long,
+            fatalOnTimeout: Boolean,
+        ): ByteArray =
             CameraProto.GetFileListResp.newBuilder()
                 .addUri("/DCIM/a.mp4")
                 .setTotalCount(1)

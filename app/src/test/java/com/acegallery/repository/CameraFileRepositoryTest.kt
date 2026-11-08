@@ -78,7 +78,12 @@ class CameraFileRepositoryTest {
         var calls = 0
             private set
 
-        override fun request(command: Int, payload: ByteArray, timeoutMs: Long): ByteArray {
+        override fun request(
+            command: Int,
+            payload: ByteArray,
+            timeoutMs: Long,
+            fatalOnTimeout: Boolean,
+        ): ByteArray {
             require(command == CameraCommands.GET_FILE_LIST)
             calls++
             val page = pages.getOrElse(index) { CameraProto.GetFileListResp.getDefaultInstance() }
