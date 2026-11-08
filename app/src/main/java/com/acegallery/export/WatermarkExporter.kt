@@ -10,11 +10,15 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import com.acegallery.R
 import com.acegallery.model.CameraFile
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 enum class WatermarkPosition { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END, BOTTOM_CENTER }
 
@@ -39,20 +43,23 @@ class WatermarkExporter(private val context: Context) {
         file: CameraFile,
         options: WatermarkOptions = WatermarkOptions(),
     ): WatermarkExportResult {
-        val rotationDegrees = ExifInterface(source.absolutePath).rotationDegrees
-        val (decoded, downscaled) = decode(source)
-        val bitmap = rotate(decoded, rotationDegrees)
-        try {
-            drawWatermark(bitmap, options.position)
-            val jpeg = ByteArrayOutputStream().use { out ->
-                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)) { "无法编码 JPEG" }
-                out.toByteArray()
-            }
-            val uri = save(jpeg, file.name.substringBeforeLast('.') + "_WM.jpg", source)
-            return WatermarkExportResult(uri, downscaled)
-        } finally {
-            bitmap.recycle()
+        val sourceExif = openSourceExif(source)
+        val rotationDegrees = readRotationDegrees(sourceExif)
+        val dateTakenMillis = captureTimeMillis(sourceExif)
+        val (jpeg, downscaled) = try {
+            renderJpeg(source, rotationDegrees, options, sampleSize = 1) to false
+        } catch (oom: OutOfMemoryError) {
+            Log.w(TAG, "Full-resolution export ran out of memory; retrying at inSampleSize=2", oom)
+            renderJpeg(source, rotationDegrees, options, sampleSize = 2) to true
         }
+        val uri = save(
+            bytes = jpeg,
+            name = file.name.substringBeforeLast('.') + "_WM.jpg",
+            source = source,
+            sourceExif = sourceExif,
+            dateTakenMillis = dateTakenMillis,
+        )
+        return WatermarkExportResult(uri, downscaled)
     }
 
     /** Renders a preview at the given (already downscaled) size without writing to MediaStore. */
@@ -63,24 +70,44 @@ class WatermarkExporter(private val context: Context) {
         return bitmap
     }
 
-    /**
-     * Decodes at full resolution first. On [OutOfMemoryError] retries once with `inSampleSize = 2`
-     * and reports the downscale so the caller can warn about the smaller export.
-     */
-    private fun decode(source: File): Pair<Bitmap, Boolean> {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(source.absolutePath, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法读取照片" }
+    private fun openSourceExif(source: File): ExifInterface = try {
+        ExifInterface(source.absolutePath)
+    } catch (exc: Exception) {
+        throw IOException("导出失败，无法读取照片信息", exc)
+    }
 
-        val full = try {
-            decodeMutable(source, sampleSize = 1)
-        } catch (_: OutOfMemoryError) {
-            null
-        }
-        return if (full != null) {
-            full to false
-        } else {
-            decodeMutable(source, sampleSize = 2) to true
+    private fun readRotationDegrees(exif: ExifInterface): Int = try {
+        exif.rotationDegrees
+    } catch (exc: Exception) {
+        throw IOException("导出失败，无法读取照片信息", exc)
+    }
+
+    /**
+     * Decodes, rotates, draws, and compresses in one attempt so an [OutOfMemoryError] anywhere in
+     * the pipeline is caught by [exportPhoto] and retried at `inSampleSize = 2`.
+     */
+    private fun renderJpeg(
+        source: File,
+        rotationDegrees: Int,
+        options: WatermarkOptions,
+        sampleSize: Int,
+    ): ByteArray {
+        var decoded: Bitmap? = null
+        var rendered: Bitmap? = null
+        try {
+            decoded = decodeMutable(source, sampleSize)
+            rendered = rotate(decoded, rotationDegrees)
+            drawWatermark(rendered, options.position)
+            return ByteArrayOutputStream().use { out ->
+                check(rendered.compress(Bitmap.CompressFormat.JPEG, 95, out)) {
+                    "导出失败，无法编码 JPEG"
+                }
+                out.toByteArray()
+            }
+        } finally {
+            // `rotate` may return the decoded bitmap itself, so only recycle distinct objects.
+            if (rendered !== decoded) rendered?.recycle()
+            decoded?.recycle()
         }
     }
 
@@ -91,20 +118,13 @@ class WatermarkExporter(private val context: Context) {
                 inMutable = true
                 inSampleSize = sampleSize
             },
-        ) ?: error("无法读取照片")
+        ) ?: error("导出失败，无法读取照片")
 
-    /** Applies the EXIF rotation, recycling the decoded bitmap once the rotated copy exists. */
+    /** Applies the EXIF rotation; ownership of both bitmaps stays with [renderJpeg]. */
     private fun rotate(bitmap: Bitmap, degrees: Int): Bitmap {
         if (degrees == 0) return bitmap
         val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
-        val rotated = try {
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        } catch (exc: Throwable) {
-            bitmap.recycle()
-            throw exc
-        }
-        if (rotated !== bitmap) bitmap.recycle()
-        return rotated
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private fun drawWatermark(bitmap: Bitmap, position: WatermarkPosition) {
@@ -129,9 +149,8 @@ class WatermarkExporter(private val context: Context) {
      * [ExifInterface] can rewrite) while it is still pending. If that is unavailable the photo is
      * saved without metadata instead of failing the export.
      */
-    private fun copyExif(source: File, destination: Uri) {
+    private fun copyExif(source: File, sourceExif: ExifInterface, destination: Uri) {
         try {
-            val sourceExif = ExifInterface(source.absolutePath)
             context.contentResolver.openFileDescriptor(destination, "rw")?.use { descriptor ->
                 val outputExif = ExifInterface(descriptor.fileDescriptor)
                 outputExif.setAttribute(ExifInterface.TAG_ORIENTATION, "1")
@@ -140,37 +159,75 @@ class WatermarkExporter(private val context: Context) {
                 }
                 outputExif.saveAttributes()
             }
-        } catch (_: Exception) {
+        } catch (exc: Exception) {
             // Metadata is best-effort; the watermarked JPEG is already written.
+            Log.w(TAG, "Failed to copy EXIF from ${source.name} to $destination", exc)
         }
     }
 
-    private fun save(bytes: ByteArray, name: String, exifSource: File): Uri {
+    /** Reads the capture time from IFD0 `DateTime` (real Ace Pro files) with an IFD1 fallback. */
+    private fun captureTimeMillis(exif: ExifInterface): Long? {
+        val raw = exif.getAttribute(ExifInterface.TAG_DATETIME)
+            ?: exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+            ?: return null
+        return try {
+            SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw)?.time
+        } catch (exc: Exception) {
+            Log.w(TAG, "Could not parse capture time \"$raw\"", exc)
+            null
+        }
+    }
+
+    private fun save(
+        bytes: ByteArray,
+        name: String,
+        source: File,
+        sourceExif: ExifInterface,
+        dateTakenMillis: Long?,
+    ): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
             put(MediaStore.MediaColumns.RELATIVE_PATH, "DCIM/Insta360")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
+            dateTakenMillis?.let { put(MediaStore.Images.Media.DATE_TAKEN, it) }
         }
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            ?: error("无法写入系统相册")
+            ?: error("导出失败，无法写入系统相册")
+        var published = false
         try {
-            resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("无法打开输出流")
-            copyExif(exifSource, uri)
+            resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                ?: error("导出失败，无法打开输出流")
+            copyExif(source, sourceExif, uri)
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-        } catch (exc: Exception) {
-            resolver.delete(uri, null, null)
-            throw exc
+            published = true
+        } finally {
+            // An Error (e.g. OOM) must not leave an IS_PENDING=1 orphan visible to the gallery.
+            if (!published) {
+                try {
+                    resolver.delete(uri, null, null)
+                } catch (cleanup: Throwable) {
+                    Log.w(TAG, "Failed to delete pending MediaStore row $uri", cleanup)
+                }
+            }
         }
         return uri
     }
 
     private companion object {
+        const val TAG = "WatermarkExporter"
+
         val COPIED_EXIF_TAGS = listOf(
+            // Real Ace Pro files carry the capture time in IFD0 DateTime only.
+            ExifInterface.TAG_DATETIME,
             ExifInterface.TAG_DATETIME_ORIGINAL,
+            ExifInterface.TAG_DATETIME_DIGITIZED,
+            ExifInterface.TAG_OFFSET_TIME,
+            ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+            ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
             ExifInterface.TAG_MAKE,
             ExifInterface.TAG_MODEL,
         )

@@ -298,10 +298,14 @@ fun ViewerScreen(
                     exportSource = null
                     exportFile = null
                 },
-                onExported = {
+                onExported = { downscaled ->
                     exportSource = null
                     exportFile = null
-                    exportMessage = "已导出带水印照片"
+                    exportMessage = if (downscaled) {
+                        "已导出带水印照片（图片较大，已降低导出分辨率）"
+                    } else {
+                        "已导出带水印照片"
+                    }
                 },
             )
         }

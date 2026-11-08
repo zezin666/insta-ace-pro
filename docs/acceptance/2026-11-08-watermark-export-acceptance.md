@@ -56,7 +56,7 @@ JAVA_HOME=/d/JDK17 ./gradlew :app:testDebugUnitTest --rerun-tasks
 公共检查（在底部居中 8064×6048 导出图上测量）：
 
 - **Logo 与圆角矩形分离**：白色圆角矩形（Ace/Pro）墨迹右边界 x=4762；Leica Logo 位图左边界 ≈4813（红圆左 4829 − 资产内边距 16）→ 间距 **51 px**，设计值 `LOGO_GAP=26×2=52 px`，通过。
-- **小字距 Logo 一个字宽**：`CO-ENGINEERED WITH` 墨迹右边界 x=4759，距 Logo 位图左边界 4813 为 **54 px**；该 19 字符文本平均字符步进为 48.6 px（墨迹宽 875 / 18），即小字右端约在 Logo 左侧 **1.1 个字符宽**处，通过。
+- **小字距 Logo 一个字宽**：`CO-ENGINEERED WITH` 墨迹右边界 x=4759，距 Logo 位图左边界 4813 为 **54 px**；该 18 字符文本平均字符步进为 48.6 px（墨迹宽 875 / 18），即小字右端约在 Logo 左侧 **1.1 个字符宽**处，通过。
 - **全部位置在画面内**：五张导出图中水印墨迹与 Logo 均位于 `[0,8064]×[0,6048]` 内，无裁切。
 - **视觉对比**：`compare-export-vs-mockup.png` 将底部居中导出水印与 `docs/superpowers/specs/assets/2026-11-08-watermark-mockup-crop.png` 并排对比；`corners-sheet.png` 展示四个角的水印。Insta360 字标、Ace 白色胶囊与透明镂空字、Pro 描边胶囊、右下方小字以及独立红色 Leica 圆标的位置关系与批准稿一致。
 
@@ -73,7 +73,7 @@ EXIF 复制：横图与竖图导出均保留 `Make=Arashi Vision`、`Model=Insta
 
 ## 最大照片与 OOM 降采样
 
-- 本次导出的 `IMG_20261108_124138_476.jpg` 为 8064×6048（约 48.7 MP），即 Ace Pro 的最高静态照片分辨率；导出结果保持 **8064×6048 全分辨率**。
+- 本次导出的 `IMG_20261108_124138_476.jpg` 为 8064×6048（≈48.8 MP），即 Ace Pro 的最高静态照片分辨率；导出结果保持 **8064×6048 全分辨率**。
 - 设备上未触发 `OutOfMemoryError`，`decode()` 未回退到 `inSampleSize=2`，因此用户可见的「图片较大，已降低导出分辨率」未出现（该消息仅在 OOM 回退时显示）。过程无崩溃，App 进程在验收期间保持存活，`logcat --pid` 无 FATAL/Exception。
 
 ## 原文件未被修改

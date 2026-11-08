@@ -69,7 +69,7 @@ The app deliberately distinguishes them, matching the official app:
 
 - **下载 (download)** — copy the camera original unchanged (the download pipeline above).
 - **导出 (export)** — write a new processed copy, leaving the original alone:
-  - `WatermarkExporter` renders a `_WM.jpg` with an "Insta360 Ace Pro" chip; position is selectable in `PhotoExportSheet`.
+  - `WatermarkExporter` renders a `_WM.jpg` with the official Insta360 Ace Pro / CO-ENGINEERED WITH / Leica style in five preset positions (bottom center by default, plus four corners), copies the capture `DateTime` (IFD0) and orientation-normalized EXIF, and retries the whole decode → rotate → draw → compress pipeline at `inSampleSize = 2` on OOM. `PhotoExportEditor` is the full-screen preview/preset editor that replaces the old `PhotoExportSheet` chip watermark.
   - `LivePhotoExporter` transcodes a 3 s clip with Media3 Transformer and builds a single-file Android Motion Photo: `SOI → APP1 XMP → APP1 Exif → JPEG → EOI → MP4`, named `MVIMG_*.jpg`. The XMP carries Google `GCamera:MotionPhoto`, legacy `MicroVideo` fields, and OPPO `OpCamera:*`; the appended 116-byte Exif with UserComment `oplus_8388608` is what ColorOS/realme require. Keep these fields consistent — file length and `VideoLength`/offset must agree.
 
 ## Hard constraints and known pitfalls

@@ -3,6 +3,7 @@ package com.acegallery.ui.viewer
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -52,9 +53,9 @@ import com.acegallery.export.WatermarkOptions
 import com.acegallery.export.WatermarkPosition
 import com.acegallery.model.CameraFile
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -68,7 +69,7 @@ fun PhotoExportEditor(
     file: CameraFile,
     exporter: WatermarkExporter,
     onDismiss: () -> Unit,
-    onExported: () -> Unit,
+    onExported: (downscaled: Boolean) -> Unit,
 ) {
     var options by remember { mutableStateOf(WatermarkOptions()) }
     var base by remember { mutableStateOf<Bitmap?>(null) }
@@ -76,7 +77,6 @@ fun PhotoExportEditor(
     var previewError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var exportError by remember { mutableStateOf<String?>(null) }
-    var notice by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     BackHandler(enabled = true) { if (!busy) onDismiss() }
@@ -193,14 +193,6 @@ fun PhotoExportEditor(
                         enabled = !busy,
                         onSelect = { options = WatermarkOptions(it) },
                     )
-                    notice?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = it,
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
                     exportError?.let {
                         Spacer(Modifier.height(8.dp))
                         Text(
@@ -223,21 +215,17 @@ fun PhotoExportEditor(
                             onClick = {
                                 busy = true
                                 exportError = null
-                                notice = null
                                 scope.launch {
                                     try {
                                         val result = withContext(Dispatchers.IO) {
                                             exporter.exportPhoto(source, file, options)
                                         }
-                                        if (result.downscaled) {
-                                            notice = DOWNSCALED_MESSAGE
-                                            delay(DOWNSCALED_MESSAGE_MS)
-                                        }
-                                        onExported()
+                                        onExported(result.downscaled)
                                     } catch (exc: CancellationException) {
                                         throw exc
                                     } catch (exc: Throwable) {
-                                        exportError = exc.readableMessage("导出失败，请重试")
+                                        Log.e(TAG, "Watermarked photo export failed", exc)
+                                        exportError = exc.exportErrorMessage()
                                         busy = false
                                     }
                                 }
@@ -310,9 +298,19 @@ private fun decodeOrientedScaled(file: File, maxSize: Int): Bitmap {
 private fun Throwable.readableMessage(fallback: String): String =
     message?.takeIf { it.isNotBlank() } ?: fallback
 
+/** Maps raw export failures to a user-facing message; the raw cause is logged at the call site. */
+private fun Throwable.exportErrorMessage(): String {
+    val detail = message?.takeIf { it.isNotBlank() }
+    if (detail != null && detail.startsWith("导出失败")) return detail
+    return when (this) {
+        is OutOfMemoryError -> "导出失败，内存不足，请重试"
+        is IOException -> "导出失败，读取或写入照片时出错"
+        else -> detail?.let { "导出失败：$it" } ?: "导出失败，请重试"
+    }
+}
+
+private const val TAG = "PhotoExportEditor"
 private const val PREVIEW_MAX_SIZE = 1200
-private const val DOWNSCALED_MESSAGE = "图片较大，已降低导出分辨率"
-private const val DOWNSCALED_MESSAGE_MS = 1_500L
 
 private val POSITION_PRESETS = listOf(
     "底部居中" to WatermarkPosition.BOTTOM_CENTER,
