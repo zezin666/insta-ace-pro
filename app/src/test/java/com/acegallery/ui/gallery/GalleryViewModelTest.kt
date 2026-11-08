@@ -10,6 +10,8 @@ import com.acegallery.network.CameraFileSource
 import com.acegallery.repository.CameraFileRepository
 import com.acegallery.session.CameraGateway
 import com.acegallery.session.CameraState
+import com.acegallery.session.CaptureMode
+import com.acegallery.session.LiveStreamParams
 import com.acegallery.settings.CameraHostProvider
 import com.acegallery.thumbnail.ThumbnailLoader
 import java.time.Instant
@@ -85,8 +87,12 @@ class GalleryViewModelTest {
     ) : CameraGateway {
         private val _state = MutableStateFlow<CameraState>(CameraState.Disconnected)
         override val state: StateFlow<CameraState> = _state
+        override val captureMode = MutableStateFlow(CaptureMode.UNKNOWN)
+        override val liveStreamParams = MutableStateFlow<LiveStreamParams?>(null)
         var lastHost: String? = null
             private set
+
+        override suspend fun setCaptureMode(mode: CaptureMode) = Unit
 
         override suspend fun connect(host: String) {
             lastHost = host

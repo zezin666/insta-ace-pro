@@ -97,3 +97,41 @@ message TakePicture {
 }
 
 message TakePictureResponse {}
+
+enum SyncCaptureMode {
+  SYNC_MODE_UNKNOWN = 0;
+  SYNC_MODE_NORMAL_IMAGE = 1;
+  SYNC_MODE_NORMAL_VIDEO = 2;
+  SYNC_MODE_HDR_IMAGE = 3;
+  SYNC_MODE_HDR_VIDEO = 4;
+  SYNC_MODE_INTERVAL_IMAGE = 5;
+  SYNC_MODE_TIMELAPSE_VIDEO = 6;
+  SYNC_MODE_BURST_PHOTO = 7;
+  SYNC_MODE_BULLETTIME_VIDEO = 8;
+  SYNC_MODE_TIMESHIFT_VIDEO = 9;
+  SYNC_MODE_AEB_NIGHT_PHOTO = 10;
+}
+
+message SetSyncCaptureMode { SyncCaptureMode capture_mode = 1; }
+message SetSyncCaptureModeResp {}
+message GetSyncCaptureMode {}
+message GetSyncCaptureModeResp { SyncCaptureMode capture_mode = 1; }
+
+message WindowCropInfo {
+  uint32 src_width = 1;
+  uint32 src_height = 2;
+  uint32 dst_width = 3;
+  uint32 dst_height = 4;
+  int32 crop_offset_x = 5;
+  int32 crop_offset_y = 6;
+}
+
+message LiveStreamParamsUpdate {
+  uint32 res_width = 2;
+  uint32 res_height = 3;
+  uint32 res_fps = 4;
+  WindowCropInfo window_crop_info = 6;
+  WindowCropInfo half_window_crop_info = 7;
+}
+
+message NotificationSyncCaptureModeUpdate {}

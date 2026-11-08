@@ -42,6 +42,12 @@ class CameraProtocolClient(
     )
     override val livePackets: Flow<ByteArray> = _livePackets.asSharedFlow()
 
+    private val _notifications = MutableSharedFlow<CameraNotification>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val notifications: Flow<CameraNotification> = _notifications.asSharedFlow()
+
     override fun start() {
         send(SYNC)
         send(KEEPALIVE)
@@ -62,7 +68,12 @@ class CameraProtocolClient(
 
     override fun isAlive(): Boolean = alive.get()
 
-    override fun request(command: Int, payload: ByteArray, timeoutMs: Long): ByteArray {
+    override fun request(
+        command: Int,
+        payload: ByteArray,
+        timeoutMs: Long,
+        fatalOnTimeout: Boolean,
+    ): ByteArray {
         if (!alive.get()) throw IOException("camera connection is closed")
         val sequence = nextSeq.getAndUpdate { (it + 1) and 0xFFFFFF }
         val deferred = CompletableDeferred<ByteArray>()
@@ -78,7 +89,7 @@ class CameraProtocolClient(
                 withTimeout(timeoutMs) { deferred.await() }
             }
         } catch (timeout: TimeoutCancellationException) {
-            markDead()
+            if (fatalOnTimeout) markDead()
             throw CameraProtocolTimeoutException("no response to command $command")
         } finally {
             pending.remove(sequence)
@@ -110,6 +121,17 @@ class CameraProtocolClient(
     private fun handleMessage(frame: ByteArray) {
         if (frame.size < 12) return
         val header = MessageCodec.parseHeader(frame)
+        // Notifications use the same seq field as requests; they are never responses,
+        // so check the code before consuming a pending sequence.
+        if (header.responseCode >= NOTIFICATION_MIN) {
+            _notifications.tryEmit(
+                CameraNotification(
+                    code = header.responseCode,
+                    body = frame.copyOfRange(12, frame.size),
+                ),
+            )
+            return
+        }
         val deferred = pending.remove(header.seq) ?: return
         if (header.responseCode != CameraCommands.RESPONSE_OK) {
             deferred.completeExceptionally(CameraProtocolException(header.responseCode))
@@ -145,6 +167,7 @@ class CameraProtocolClient(
     }
 
     private companion object {
+        const val NOTIFICATION_MIN = 8000
         val SYNC = byteArrayOf(0x06, 0x00, 0x00) + "syNceNdinS".toByteArray()
         val KEEPALIVE = byteArrayOf(0x05, 0x00, 0x00)
     }

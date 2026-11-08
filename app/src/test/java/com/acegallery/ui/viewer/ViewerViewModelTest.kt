@@ -9,6 +9,8 @@ import com.acegallery.network.CameraFileSource
 import com.acegallery.repository.CameraFileRepository
 import com.acegallery.session.CameraGateway
 import com.acegallery.session.CameraState
+import com.acegallery.session.CaptureMode
+import com.acegallery.session.LiveStreamParams
 import com.acegallery.thumbnail.ThumbnailLoader
 import java.time.Instant
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +34,9 @@ class ViewerViewModelTest {
     private class FakeSession : CameraGateway {
         private val _state = MutableStateFlow<CameraState>(CameraState.Connected("192.168.42.1"))
         override val state: StateFlow<CameraState> = _state
+        override val captureMode = MutableStateFlow(CaptureMode.UNKNOWN)
+        override val liveStreamParams = MutableStateFlow<LiveStreamParams?>(null)
+        override suspend fun setCaptureMode(mode: CaptureMode) = Unit
         override suspend fun connect(host: String) = Unit
         override fun disconnect() = Unit
         override suspend fun listFiles(): List<CameraFile> = emptyList()
