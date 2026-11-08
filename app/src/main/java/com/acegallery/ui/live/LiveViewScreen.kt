@@ -7,10 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.acegallery.live.LiveViewDecoder
+import com.acegallery.session.CaptureMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -141,6 +142,8 @@ fun LiveViewScreen(
                     }
                 },
                 actions = {
+                    ModeChip(mode = state.captureMode, busy = state.busy)
+                    Spacer(Modifier.width(8.dp))
                     StatusDot(
                         recording = state.recording,
                         streaming = state.streaming,
@@ -158,14 +161,27 @@ fun LiveViewScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background),
         ) {
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.Black),
+                    .weight(1f)
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
             ) {
+                val params = state.liveParams ?: state.decodedParams
+                val ratio = if (params != null && params.width > 0 && params.height > 0) {
+                    params.width.toFloat() / params.height
+                } else {
+                    16f / 9f
+                }
+                val size = previewSize(maxWidth.value, maxHeight.value * 0.55f, ratio)
+                Box(
+                    modifier = Modifier
+                        .width(size.width.dp)
+                        .height(size.height.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black),
+                ) {
                 AndroidView(
                     factory = { textureView },
                     modifier = Modifier.fillMaxSize(),
@@ -216,6 +232,7 @@ fun LiveViewScreen(
                             .background(Color.White.copy(alpha = 0.75f)),
                     )
                 }
+                }
             }
 
             Spacer(Modifier.height(20.dp))
@@ -228,7 +245,7 @@ fun LiveViewScreen(
                     label = "拍照",
                     container = MaterialTheme.colorScheme.surfaceVariant,
                     content = MaterialTheme.colorScheme.onSurface,
-                    enabled = state.streaming && !state.busy,
+                    enabled = state.streaming && !state.busy && !state.recording,
                     onClick = {
                         viewModel.takePhoto()
                         flash = true
@@ -243,7 +260,7 @@ fun LiveViewScreen(
                         Color(0xFFD32F2F)
                     },
                     content = Color.White,
-                    enabled = state.streaming && !state.busy,
+                    enabled = state.streaming && !state.busy && !state.capturing,
                     onClick = viewModel::toggleRecording,
                 )
             }
@@ -257,12 +274,36 @@ fun LiveViewScreen(
                 )
             }
             Text(
-                text = "拍照和录制使用相机当前模式；录制时可继续实时预览。",
+                text = "拍照/录制会自动把相机切换到照片/视频模式。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ModeChip(mode: CaptureMode, busy: Boolean) {
+    val text = when {
+        busy -> "切换模式…"
+        mode == CaptureMode.PHOTO -> "照片"
+        mode == CaptureMode.VIDEO -> "视频"
+        else -> "未知"
+    }
+    Box(
+        modifier = Modifier
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant,
+                RoundedCornerShape(8.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
