@@ -15,7 +15,7 @@ import com.acegallery.model.CameraFile
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-enum class WatermarkPosition { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END }
+enum class WatermarkPosition { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END, BOTTOM_CENTER }
 
 data class WatermarkOptions(
     val position: WatermarkPosition = WatermarkPosition.BOTTOM_END,
@@ -84,10 +84,14 @@ class WatermarkExporter(private val context: Context) {
         val left = when (options.position) {
             WatermarkPosition.TOP_START, WatermarkPosition.BOTTOM_START -> margin
             WatermarkPosition.TOP_END, WatermarkPosition.BOTTOM_END -> bitmap.width - margin - chipWidth
+            WatermarkPosition.BOTTOM_CENTER -> (bitmap.width - chipWidth) / 2f
         }
         val top = when (options.position) {
             WatermarkPosition.TOP_START, WatermarkPosition.TOP_END -> margin
-            WatermarkPosition.BOTTOM_START, WatermarkPosition.BOTTOM_END -> bitmap.height - margin - chipHeight
+            WatermarkPosition.BOTTOM_START,
+            WatermarkPosition.BOTTOM_END,
+            WatermarkPosition.BOTTOM_CENTER,
+            -> bitmap.height - margin - chipHeight
         }
 
         val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
