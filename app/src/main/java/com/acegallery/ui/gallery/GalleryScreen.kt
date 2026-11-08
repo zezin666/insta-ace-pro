@@ -31,9 +31,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -80,8 +78,6 @@ import com.acegallery.session.CameraState
 fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel(),
     onOpenViewer: (List<CameraFile>, Int) -> Unit = { _, _ -> },
-    onOpenSettings: () -> Unit = {},
-    onOpenLive: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val downloaded by viewModel.downloadedPaths.collectAsStateWithLifecycle()
@@ -124,14 +120,8 @@ fun GalleryScreen(
                         if (state.selectionMode) {
                             TextButton(onClick = viewModel::clearSelection) { Text("取消") }
                         } else {
-                            IconButton(onClick = onOpenLive) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = "实时画面")
-                            }
                             IconButton(onClick = viewModel::refresh) {
                                 Icon(Icons.Filled.Refresh, contentDescription = "刷新")
-                            }
-                            IconButton(onClick = onOpenSettings) {
-                                Icon(Icons.Filled.Settings, contentDescription = "设置")
                             }
                         }
                     },

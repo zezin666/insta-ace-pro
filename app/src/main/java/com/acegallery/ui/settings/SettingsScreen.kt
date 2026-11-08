@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SettingsScreen(
     onBack: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenAbout: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -133,6 +134,23 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("电池优化设置")
+                }
+            }
+
+            SectionCard(
+                icon = Icons.Filled.Info,
+                title = "关于",
+            ) {
+                Text(
+                    text = "查看版本信息、应用基础信息与参考的开源项目。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FilledTonalButton(
+                    onClick = onOpenAbout,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("打开关于")
                 }
             }
         }
