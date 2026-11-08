@@ -286,6 +286,25 @@ fun ViewerScreen(
                 )
             }
         }
+
+        val expSrc = exportSource
+        val expF = exportFile
+        if (expSrc != null && expF != null) {
+            PhotoExportEditor(
+                source = expSrc,
+                file = expF,
+                exporter = watermarkExporter,
+                onDismiss = {
+                    exportSource = null
+                    exportFile = null
+                },
+                onExported = {
+                    exportSource = null
+                    exportFile = null
+                    exportMessage = "已导出带水印照片"
+                },
+            )
+        }
     }
 
     val liveSrc = liveSource
@@ -303,25 +322,6 @@ fun ViewerScreen(
                 liveSource = null
                 liveFile = null
                 exportMessage = "已导出 Live 图到相册"
-            },
-        )
-    }
-
-    val expSrc = exportSource
-    val expF = exportFile
-    if (expSrc != null && expF != null) {
-        PhotoExportSheet(
-            source = expSrc,
-            file = expF,
-            exporter = watermarkExporter,
-            onDismiss = {
-                exportSource = null
-                exportFile = null
-            },
-            onExported = {
-                exportSource = null
-                exportFile = null
-                exportMessage = "已导出带水印照片"
             },
         )
     }
