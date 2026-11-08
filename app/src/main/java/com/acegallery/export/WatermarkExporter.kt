@@ -15,19 +15,28 @@ import com.acegallery.model.CameraFile
 import java.io.ByteArrayOutputStream
 import java.io.File
 
+enum class WatermarkPosition { TOP_START, TOP_END, BOTTOM_START, BOTTOM_END }
+
+data class WatermarkOptions(
+    val position: WatermarkPosition = WatermarkPosition.BOTTOM_END,
+)
+
 /**
- * Exports a copy of a photo with an Insta360-style watermark. Unlike "download"
- * (which copies the original file), this writes a new `_WM.jpg` file and leaves
- * the original untouched.
+ * Exports a copy of a photo with an Insta360-style watermark (infinity mark + text).
+ * Unlike "download", this writes a new `_WM.jpg` file and leaves the original untouched.
  */
 class WatermarkExporter(private val context: Context) {
 
-    fun exportPhoto(source: File, file: CameraFile): Uri {
+    fun exportPhoto(
+        source: File,
+        file: CameraFile,
+        options: WatermarkOptions = WatermarkOptions(),
+    ): Uri {
         val original = BitmapFactory.decodeFile(source.absolutePath)
             ?: error("无法读取照片")
         val bitmap = original.copy(Bitmap.Config.ARGB_8888, true)
         try {
-            drawWatermark(bitmap)
+            drawWatermark(bitmap, options)
             val jpeg = ByteArrayOutputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
                 out.toByteArray()
@@ -39,27 +48,62 @@ class WatermarkExporter(private val context: Context) {
         }
     }
 
-    private fun drawWatermark(bitmap: Bitmap) {
+    /** Renders a preview at the given (already downscaled) size without writing to MediaStore. */
+    fun renderPreview(source: Bitmap, options: WatermarkOptions): Bitmap {
+        val bitmap = source.copy(Bitmap.Config.ARGB_8888, true)
+        drawWatermark(bitmap, options)
+        return bitmap
+    }
+
+    private fun drawWatermark(bitmap: Bitmap, options: WatermarkOptions) {
         val canvas = Canvas(bitmap)
-        val textSize = (bitmap.width * 0.028f).coerceIn(28f, 96f)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val textSize = (bitmap.width * 0.026f).coerceIn(20f, 120f)
+        val text = "Insta360 Ace Pro"
+        val icon = "∞"
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             this.textSize = textSize
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        val text = "Insta360 Ace Pro"
-        val textWidth = paint.measureText(text)
+        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(245, 199, 107)
+            this.textSize = textSize * 1.35f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+
+        val iconWidth = iconPaint.measureText(icon)
+        val gap = textSize * 0.45f
+        val textWidth = textPaint.measureText(text)
         val padH = textSize * 0.65f
         val padV = textSize * 0.42f
+        val chipWidth = padH * 2 + iconWidth + gap + textWidth
+        val chipHeight = textSize * 1.35f + padV * 2
         val margin = (bitmap.width * 0.028f).coerceAtLeast(16f)
-        val left = bitmap.width - margin - textWidth - padH * 2
-        val top = bitmap.height - margin - textSize - padV * 2
-        val rect = RectF(left, top, bitmap.width - margin, bitmap.height - margin)
-        val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.argb(120, 0, 0, 0)
+
+        val left = when (options.position) {
+            WatermarkPosition.TOP_START, WatermarkPosition.BOTTOM_START -> margin
+            WatermarkPosition.TOP_END, WatermarkPosition.BOTTOM_END -> bitmap.width - margin - chipWidth
         }
-        canvas.drawRoundRect(rect, textSize * 0.55f, textSize * 0.55f, background)
-        canvas.drawText(text, left + padH, top + padV + textSize * 0.8f, paint)
+        val top = when (options.position) {
+            WatermarkPosition.TOP_START, WatermarkPosition.TOP_END -> margin
+            WatermarkPosition.BOTTOM_START, WatermarkPosition.BOTTOM_END -> bitmap.height - margin - chipHeight
+        }
+
+        val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(120, 0, 0, 0)
+        }
+        val rect = RectF(left, top, left + chipWidth, top + chipHeight)
+        canvas.drawRoundRect(rect, chipHeight * 0.4f, chipHeight * 0.4f, background)
+
+        val baseline = top + chipHeight / 2f - (iconPaint.descent() + iconPaint.ascent()) / 2f
+        canvas.drawText(icon, left + padH, baseline, iconPaint)
+        canvas.drawText(
+            text,
+            left + padH + iconWidth + gap,
+            top + chipHeight / 2f - (textPaint.descent() + textPaint.ascent()) / 2f,
+            textPaint,
+        )
     }
 
     private fun save(bytes: ByteArray, name: String): Uri {

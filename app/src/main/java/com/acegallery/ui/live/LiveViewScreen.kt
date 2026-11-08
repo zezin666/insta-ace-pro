@@ -1,9 +1,10 @@
 package com.acegallery.ui.live
 
+import android.graphics.SurfaceTexture
 import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.TextureView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,13 +18,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,41 +49,47 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.acegallery.live.LiveViewDecoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveViewScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     viewModel: LiveViewViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val surfaceView = remember {
-        SurfaceView(context).apply {
-            holder.setKeepScreenOn(true)
-        }
-    }
+    val textureView = remember { TextureView(context) }
     var surface by remember { mutableStateOf<Surface?>(null) }
+    var flash by remember { mutableStateOf(false) }
+    var recordSeconds by remember { mutableIntStateOf(0) }
 
-    DisposableEffect(surfaceView) {
-        val holder = surfaceView.holder
-        val callback = object : SurfaceHolder.Callback {
-            override fun surfaceCreated(h: SurfaceHolder) {
-                surface = h.surface
+    DisposableEffect(textureView) {
+        textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+                surface?.release()
+                surface = Surface(texture)
             }
 
-            override fun surfaceChanged(h: SurfaceHolder, format: Int, width: Int, height: Int) {
-                surface = h.surface
-            }
+            override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
 
-            override fun surfaceDestroyed(h: SurfaceHolder) {
+            override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+                surface?.release()
                 surface = null
+                return true
             }
+
+            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
         }
-        holder.addCallback(callback)
-        onDispose { holder.removeCallback(callback) }
+        if (textureView.isAvailable && surface == null) {
+            textureView.surfaceTexture?.let { surface = Surface(it) }
+        }
+        onDispose {
+            surface?.release()
+            surface = null
+        }
     }
 
     DisposableEffect(Unit) {
@@ -106,28 +112,42 @@ fun LiveViewScreen(
         }
     }
 
+    LaunchedEffect(flash) {
+        if (flash) {
+            delay(160)
+            flash = false
+        }
+    }
+
+    LaunchedEffect(state.recording) {
+        recordSeconds = 0
+        if (state.recording) {
+            while (true) {
+                delay(1_000)
+                recordSeconds++
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("实时画面") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
                 actions = {
-                    val status = when {
-                        state.recording -> "录制中"
-                        state.streaming -> "预览中"
-                        state.busy -> "连接中…"
-                        else -> "未连接"
-                    }
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 12.dp),
+                    StatusDot(
+                        recording = state.recording,
+                        streaming = state.streaming,
+                        busy = state.busy,
+                        seconds = recordSeconds,
                     )
+                    Spacer(Modifier.width(12.dp))
                 },
             )
         },
@@ -136,16 +156,18 @@ fun LiveViewScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(Color.Black),
+                .background(MaterialTheme.colorScheme.background),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(16.dp)
                     .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(20.dp))
                     .background(Color.Black),
             ) {
                 AndroidView(
-                    factory = { surfaceView },
+                    factory = { textureView },
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (!state.streaming) {
@@ -165,54 +187,67 @@ fun LiveViewScreen(
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(12.dp),
+                            .padding(12.dp)
+                            .background(
+                                Color.Black.copy(alpha = 0.55f),
+                                RoundedCornerShape(12.dp),
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(8.dp)
                                 .clip(CircleShape)
                                 .background(Color.Red),
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "REC",
+                            text = "REC ${formatDuration(recordSeconds)}",
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 }
+                if (flash) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = 0.75f)),
+                    )
+                }
             }
 
             Spacer(Modifier.height(20.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                FilledTonalButton(
-                    onClick = viewModel::takePhoto,
+                CircleControl(
+                    label = "拍照",
+                    container = MaterialTheme.colorScheme.surfaceVariant,
+                    content = MaterialTheme.colorScheme.onSurface,
                     enabled = state.streaming && !state.busy,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("拍照")
-                }
-                Button(
-                    onClick = viewModel::toggleRecording,
-                    enabled = state.streaming && !state.busy,
-                    modifier = Modifier.weight(1f),
-                    colors = if (state.recording) {
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                        )
-                    } else {
-                        ButtonDefaults.buttonColors()
+                    onClick = {
+                        viewModel.takePhoto()
+                        flash = true
                     },
-                ) {
-                    Text(if (state.recording) "停止录制" else "开始录制")
-                }
+                )
+                Spacer(Modifier.width(36.dp))
+                CircleControl(
+                    label = if (state.recording) "停止" else "录制",
+                    container = if (state.recording) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        Color(0xFFD32F2F)
+                    },
+                    content = Color.White,
+                    enabled = state.streaming && !state.busy,
+                    onClick = viewModel::toggleRecording,
+                )
             }
+
             state.message?.let { message ->
                 Text(
                     text = message,
@@ -222,7 +257,7 @@ fun LiveViewScreen(
                 )
             }
             Text(
-                text = "拍照和录制使用相机当前模式；录制时仍可实时预览。",
+                text = "拍照和录制使用相机当前模式；录制时可继续实时预览。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
@@ -230,3 +265,65 @@ fun LiveViewScreen(
         }
     }
 }
+
+@Composable
+private fun StatusDot(
+    recording: Boolean,
+    streaming: Boolean,
+    busy: Boolean,
+    seconds: Int,
+) {
+    val text = when {
+        recording -> "录制中 ${formatDuration(seconds)}"
+        streaming -> "预览中"
+        busy -> "连接中…"
+        else -> "未连接"
+    }
+    val color = when {
+        recording -> Color(0xFFE53935)
+        streaming -> MaterialTheme.colorScheme.secondary
+        busy -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+        )
+    }
+}
+
+@Composable
+private fun CircleControl(
+    label: String,
+    container: Color,
+    content: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .clip(CircleShape)
+            .background(if (enabled) container else container.copy(alpha = 0.4f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = content,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+private fun formatDuration(seconds: Int): String =
+    "%02d:%02d".format(seconds / 60, seconds % 60)

@@ -37,28 +37,36 @@ import kotlinx.coroutines.withContext
  */
 class LivePhotoExporter(private val context: Context) {
 
-    suspend fun export(video: File, file: CameraFile): Uri {
-        val clip = createClip(video, File(context.cacheDir, "live").apply { mkdirs() })
+    suspend fun export(
+        video: File,
+        file: CameraFile,
+        startMs: Long = 0L,
+        coverMs: Long = 1_500L,
+    ): Uri {
+        val clip = createClip(video, File(context.cacheDir, "live").apply { mkdirs() }, startMs)
         try {
-            val cover = createCover(video)
-            val bytes = buildMotionPhoto(cover.first, cover.second, clip)
+            val cover = createCover(video, coverMs * 1_000)
+            val presentationUs = (coverMs - startMs).coerceAtLeast(0L) * 1_000
+            val bytes = buildMotionPhoto(cover.first, cover.second, clip, presentationUs)
             val base = file.name.substringBeforeLast('.')
             val photoBase = if (base.startsWith("VID_")) {
-                "IMG_" + base.removePrefix("VID_")
-            } else {
+                "MVIMG_" + base.removePrefix("VID_")
+            } else if (base.startsWith("MVIMG_")) {
                 base
+            } else {
+                "MVIMG_$base"
             }
-            return save(bytes, "${photoBase}_MP.jpg")
+            return save(bytes, "$photoBase.jpg")
         } finally {
             clip.delete()
         }
     }
 
-    private fun createCover(video: File): Pair<Bitmap, ByteArray> {
+    private fun createCover(video: File, coverUs: Long): Pair<Bitmap, ByteArray> {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(video.absolutePath)
-            var frame = retriever.getFrameAtTime(1_500_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            var frame = retriever.getFrameAtTime(coverUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: error("无法读取视频封面")
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
@@ -87,18 +95,18 @@ class LivePhotoExporter(private val context: Context) {
         }
     }
 
-    private suspend fun createClip(video: File, dir: File): File {
+    private suspend fun createClip(video: File, dir: File, startMs: Long): File {
         val output = File(dir, "${video.nameWithoutExtension}_live.mp4")
         output.delete()
-        return runCatching { transcodeClip(video, output) }
+        return runCatching { transcodeClip(video, output, startMs) }
             .getOrElse { error ->
                 android.util.Log.w("LivePhoto", "Transformer failed; remuxing", error)
                 output.delete()
-                remuxClip(video, output)
+                remuxClip(video, output, startMs)
             }
     }
 
-    private suspend fun transcodeClip(video: File, output: File): File =
+    private suspend fun transcodeClip(video: File, output: File, startMs: Long): File =
         withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { continuation ->
                 val transformer = Transformer.Builder(context)
@@ -121,7 +129,8 @@ class LivePhotoExporter(private val context: Context) {
                     .setUri(Uri.fromFile(video))
                     .setClippingConfiguration(
                         MediaItem.ClippingConfiguration.Builder()
-                            .setEndPositionMs(3_000)
+                            .setStartPositionMs(startMs)
+                            .setEndPositionMs(startMs + 3_000)
                             .build(),
                     )
                     .build()
@@ -134,7 +143,7 @@ class LivePhotoExporter(private val context: Context) {
             output
         }
 
-    private fun remuxClip(video: File, output: File): File {
+    private fun remuxClip(video: File, output: File, startMs: Long): File {
         val extractor = MediaExtractor()
         val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         try {
@@ -151,14 +160,18 @@ class LivePhotoExporter(private val context: Context) {
             if (trackMap.keys.none { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }) {
                 error("视频里没有可用的视频轨")
             }
+            if (startMs > 0) {
+                extractor.seekTo(startMs * 1_000, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            }
             muxer.start()
             val buffer = ByteBuffer.allocate(8 * 1024 * 1024)
             val info = android.media.MediaCodec.BufferInfo()
+            val endUs = startMs * 1_000 + CLIP_US
             while (true) {
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) break
                 val time = extractor.sampleTime
-                if (time > CLIP_US) break
+                if (time > endUs) break
                 val outTrack = trackMap[extractor.sampleTrackIndex]
                 if (outTrack == null) {
                     extractor.advance()
@@ -181,10 +194,15 @@ class LivePhotoExporter(private val context: Context) {
         }
     }
 
-    private fun buildMotionPhoto(cover: Bitmap, jpeg: ByteArray, clip: File): ByteArray {
+    private fun buildMotionPhoto(
+        cover: Bitmap,
+        jpeg: ByteArray,
+        clip: File,
+        presentationUs: Long,
+    ): ByteArray {
         val videoLength = clip.length()
         require(videoLength > 0) { "视频片段为空" }
-        val xmp = buildXmp(videoLength)
+        val xmp = buildXmp(videoLength, presentationUs)
         val jpegWithSegments = insertSegments(jpeg, xmp, cover.width, cover.height)
         val out = ByteArrayOutputStream(jpegWithSegments.size + videoLength.toInt())
         out.write(jpegWithSegments)
@@ -216,10 +234,10 @@ class LivePhotoExporter(private val context: Context) {
         ) + xmpPayload
 
         val exif = oppoExif(width, height)
-        return jpeg.copyOfRange(0, offset) + xmpSegment + exif + jpeg.copyOfRange(offset, jpeg.size)
+        return jpeg.copyOfRange(0, offset) + exif + xmpSegment + jpeg.copyOfRange(offset, jpeg.size)
     }
 
-    private fun buildXmp(videoLength: Long): ByteArray {
+    private fun buildXmp(videoLength: Long, presentationUs: Long): ByteArray {
         val xml = """
             <x:xmpmeta xmlns:x="adobe:ns:meta/">
              <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -230,12 +248,8 @@ class LivePhotoExporter(private val context: Context) {
                 xmlns:Item="http://ns.google.com/photos/1.0/container/item/"
                 GCamera:MotionPhoto="1"
                 GCamera:MotionPhotoVersion="1"
-                GCamera:MotionPhotoPresentationTimestampUs="1500000"
-                GCamera:MicroVideo="1"
-                GCamera:MicroVideoVersion="1"
-                GCamera:MicroVideoOffset="$videoLength"
-                GCamera:MicroVideoPresentationTimestampUs="1500000"
-                OpCamera:MotionPhotoPrimaryPresentationTimestampUs="1500000"
+                GCamera:MotionPhotoPresentationTimestampUs="$presentationUs"
+                OpCamera:MotionPhotoPrimaryPresentationTimestampUs="$presentationUs"
                 OpCamera:MotionPhotoOwner="oplus"
                 OpCamera:OLivePhotoVersion="2"
                 OpCamera:VideoLength="$videoLength">
@@ -302,11 +316,13 @@ class LivePhotoExporter(private val context: Context) {
         const val CLIP_US = 3_000_000L
         val XMP_IDENTIFIER = "http://ns.adobe.com/xap/1.0/\u0000".toByteArray(Charsets.US_ASCII)
 
-        // 116-byte Exif with UserComment = "oplus_8388608"; ColorOS/realme require it.
+        // 124-byte Exif with UserComment (type 7) = "ASCII\0\0\0" + "oplus_10485792".
+        // Matches native OnePlus Ace 3 Pro / ColorOS 16 captures; the older
+        // "oplus_8388608" ASCII-only marker is not recognized there.
         // Width at [28..31], height at [40..43] (big-endian TIFF).
         const val OPPO_EXIF_HEX =
-            "FFE100724578696600004D4D002A0000000800040100000400000001000005A001010004000000010000043C" +
-                "87690004000000010000003E011200030000000100000000000000000002928600020000000E0000005C" +
-                "920800040000000100000000000000006F706C75735F3833383836303800"
+            "FFE1007A4578696600004D4D002A0000000800040100000400000001000005A001010004000000010000043C" +
+                "87690004000000010000003E01120003000000010000000000000000000292860007000000160000005C" +
+                "9208000400000001000000000000000041534349490000006F706C75735F3130343835373932"
     }
 }

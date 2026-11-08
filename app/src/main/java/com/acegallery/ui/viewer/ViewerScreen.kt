@@ -144,27 +144,12 @@ fun ViewerScreen(
         }
     }
 
-    val startExport: (CameraFile) -> Unit = { file ->
-        if (!exportBusy) {
-            exportScope.launch {
-                exportBusy = true
-                exportMessage = null
-                try {
-                    val source = withContext(Dispatchers.IO) {
-                        PhotoCache(session, context.cacheDir).get(file)
-                    }
-                    withContext(Dispatchers.IO) { exporter.export(source, file) }
-                    exportMessage = "已导出 Live 图到相册"
-                } catch (exc: Exception) {
-                    exportMessage = exc.message ?: "导出 Live 图失败"
-                } finally {
-                    exportBusy = false
-                }
-            }
-        }
-    }
+    var liveSource by remember { mutableStateOf<File?>(null) }
+    var liveFile by remember { mutableStateOf<CameraFile?>(null) }
+    var exportSource by remember { mutableStateOf<File?>(null) }
+    var exportFile by remember { mutableStateOf<CameraFile?>(null) }
 
-    val startWatermark: (CameraFile) -> Unit = { file ->
+    val prepareExport: (CameraFile, Boolean) -> Unit = { file, live ->
         if (!exportBusy) {
             exportScope.launch {
                 exportBusy = true
@@ -173,10 +158,15 @@ fun ViewerScreen(
                     val source = withContext(Dispatchers.IO) {
                         PhotoCache(session, context.cacheDir).get(file)
                     }
-                    withContext(Dispatchers.IO) { watermarkExporter.exportPhoto(source, file) }
-                    exportMessage = "已导出带水印照片"
+                    if (live) {
+                        liveSource = source
+                        liveFile = file
+                    } else {
+                        exportSource = source
+                        exportFile = file
+                    }
                 } catch (exc: Exception) {
-                    exportMessage = exc.message ?: "导出带水印照片失败"
+                    exportMessage = exc.message ?: "准备文件失败"
                 } finally {
                     exportBusy = false
                 }
@@ -253,7 +243,7 @@ fun ViewerScreen(
                 onBack = onBack,
                 onDownload = { onDownload(current) },
                 onExportLive = if (current.kind == CameraFileKind.VIDEO) {
-                    { startExport(current) }
+                    { prepareExport(current, true) }
                 } else {
                     null
                 },
@@ -271,7 +261,7 @@ fun ViewerScreen(
                 sizeBytes = currentSize,
                 onShare = readyFiles[current.path]?.let { file -> { share(context, file) } },
                 onWatermark = if (isViewablePhoto(current)) {
-                    { startWatermark(current) }
+                    { prepareExport(current, false) }
                 } else {
                     null
                 },
@@ -296,6 +286,44 @@ fun ViewerScreen(
                 )
             }
         }
+    }
+
+    val liveSrc = liveSource
+    val liveF = liveFile
+    if (liveSrc != null && liveF != null) {
+        LivePhotoExportDialog(
+            source = liveSrc,
+            file = liveF,
+            exporter = exporter,
+            onDismiss = {
+                liveSource = null
+                liveFile = null
+            },
+            onExported = {
+                liveSource = null
+                liveFile = null
+                exportMessage = "已导出 Live 图到相册"
+            },
+        )
+    }
+
+    val expSrc = exportSource
+    val expF = exportFile
+    if (expSrc != null && expF != null) {
+        PhotoExportSheet(
+            source = expSrc,
+            file = expF,
+            exporter = watermarkExporter,
+            onDismiss = {
+                exportSource = null
+                exportFile = null
+            },
+            onExported = {
+                exportSource = null
+                exportFile = null
+                exportMessage = "已导出带水印照片"
+            },
+        )
     }
 
     if (exportBusy) {
@@ -421,7 +449,7 @@ private fun BottomChrome(
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                         ) {
-                            Text("水印")
+                            Text("导出")
                         }
                     }
                 }
