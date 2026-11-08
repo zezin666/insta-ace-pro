@@ -183,7 +183,6 @@ class CameraSession @Inject constructor(
     }
 
     override suspend fun takePicture() {
-        if (_captureMode.value != CaptureMode.PHOTO) setCaptureMode(CaptureMode.PHOTO)
         val request = CameraProto.TakePicture.newBuilder()
             .setMode(CameraProto.TakePictureMode.TAKE_PICTURE_NORMAL)
             .build()
@@ -195,7 +194,6 @@ class CameraSession @Inject constructor(
     }
 
     override suspend fun startRecording() {
-        if (_captureMode.value != CaptureMode.VIDEO) setCaptureMode(CaptureMode.VIDEO)
         val request = CameraProto.StartCapture.newBuilder()
             .setMode(CameraProto.CaptureMode.CAPTURE_MODE_NORMAL)
             .build()

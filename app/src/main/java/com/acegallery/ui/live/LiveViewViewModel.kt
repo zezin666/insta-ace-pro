@@ -117,7 +117,6 @@ class LiveViewViewModel @Inject constructor(
     }
 
     fun takePhoto() {
-        if (_state.value.recording || _state.value.capturing || _state.value.busy) return
         viewModelScope.launch {
             _state.update { it.copy(busy = true, capturing = true, message = null) }
             runCatching {
@@ -137,7 +136,6 @@ class LiveViewViewModel @Inject constructor(
     }
 
     fun toggleRecording() {
-        if (_state.value.capturing || _state.value.busy) return
         viewModelScope.launch {
             val recording = _state.value.recording
             _state.update { it.copy(busy = true, message = null) }

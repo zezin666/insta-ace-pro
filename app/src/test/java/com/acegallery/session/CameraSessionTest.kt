@@ -63,30 +63,23 @@ class CameraSessionTest {
     }
 
     @Test
-    fun `take picture switches to photo mode first`() = runTest {
+    fun `take picture sends the capture command directly`() = runTest {
         val transport = RecordingTransport(initialMode = CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_VIDEO)
         val session = session(FakeFinder(FakeHandle), transport)
         session.connect()
         session.takePicture()
-        assertEquals(
-            listOf(
-                CameraCommands.GET_SYNC_CAPTURE_MODE,
-                CameraCommands.SET_SYNC_CAPTURE_MODE,
-                CameraCommands.TAKE_PICTURE,
-            ),
-            transport.commands.filter { it in setOf(55, 54, 3) },
-        )
-        assertEquals(CaptureMode.PHOTO, session.captureMode.value)
+        assertTrue(CameraCommands.TAKE_PICTURE in transport.commands)
+        assertTrue(CameraCommands.SET_SYNC_CAPTURE_MODE !in transport.commands)
     }
 
     @Test
-    fun `start recording switches to video mode first`() = runTest {
+    fun `start recording sends the capture command directly`() = runTest {
         val transport = RecordingTransport(initialMode = CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_IMAGE)
         val session = session(FakeFinder(FakeHandle), transport)
         session.connect()
         session.startRecording()
-        assertEquals(CaptureMode.VIDEO, session.captureMode.value)
         assertTrue(CameraCommands.START_CAPTURE in transport.commands)
+        assertTrue(CameraCommands.SET_SYNC_CAPTURE_MODE !in transport.commands)
     }
 
     @Test
@@ -122,18 +115,6 @@ class CameraSessionTest {
         )
         assertEquals(1920, session.liveStreamParams.value?.width)
         assertEquals(1080, session.liveStreamParams.value?.height)
-    }
-
-    @Test
-    fun `mode switch rejection prevents the capture command`() = runTest {
-        val transport = RecordingTransport(failModeSwitchWith = 400)
-        val session = session(FakeFinder(FakeHandle), transport)
-        session.connect()
-        val error = runCatching { session.takePicture() }.exceptionOrNull()
-        assertTrue(error is CameraProtocolException)
-        assertTrue(error?.message?.contains("无法切换相机模式") == true)
-        assertTrue(CameraCommands.TAKE_PICTURE !in transport.commands)
-        assertTrue(session.state.value is CameraState.Connected)
     }
 
     @Test

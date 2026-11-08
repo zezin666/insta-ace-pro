@@ -47,7 +47,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.acegallery.live.LiveViewDecoder
-import com.acegallery.session.CaptureMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -142,8 +141,6 @@ fun LiveViewScreen(
                     }
                 },
                 actions = {
-                    ModeChip(mode = state.captureMode, busy = state.busy)
-                    Spacer(Modifier.width(8.dp))
                     StatusDot(
                         recording = state.recording,
                         streaming = state.streaming,
@@ -249,7 +246,7 @@ fun LiveViewScreen(
                     label = "拍照",
                     container = MaterialTheme.colorScheme.surfaceVariant,
                     content = MaterialTheme.colorScheme.onSurface,
-                    enabled = state.streaming && !state.busy && !state.recording,
+                    enabled = state.streaming && !state.busy,
                     onClick = {
                         viewModel.takePhoto()
                         flash = true
@@ -264,7 +261,7 @@ fun LiveViewScreen(
                         Color(0xFFD32F2F)
                     },
                     content = Color.White,
-                    enabled = state.streaming && !state.busy && !state.capturing,
+                    enabled = state.streaming && !state.busy,
                     onClick = viewModel::toggleRecording,
                 )
             }
@@ -278,36 +275,12 @@ fun LiveViewScreen(
                 )
             }
             Text(
-                text = "拍照/录制会自动把相机切换到照片/视频模式。",
+                text = "拍照和录制使用相机当前模式；录制时仍可实时预览。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
             )
         }
-    }
-}
-
-@Composable
-private fun ModeChip(mode: CaptureMode, busy: Boolean) {
-    val text = when {
-        busy -> "切换模式…"
-        mode == CaptureMode.PHOTO -> "照片"
-        mode == CaptureMode.VIDEO -> "视频"
-        else -> "未知"
-    }
-    Box(
-        modifier = Modifier
-            .background(
-                MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(8.dp),
-            )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

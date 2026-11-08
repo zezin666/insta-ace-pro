@@ -24,7 +24,7 @@ class LiveViewViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
-    fun `photo is ignored while recording`() = runTest {
+    fun `photo is sent directly while recording`() = runTest {
         val gateway = FakeGateway()
         val vm = viewModel(gateway)
         vm.start()
@@ -33,11 +33,11 @@ class LiveViewViewModelTest {
         advanceUntilIdle()
         vm.takePhoto()
         advanceUntilIdle()
-        assertEquals(0, gateway.takePictureCalls)
+        assertEquals(1, gateway.takePictureCalls)
     }
 
     @Test
-    fun `record is ignored while capturing`() = runTest {
+    fun `record is sent directly while capturing`() = runTest {
         val gateway = FakeGateway(blockTakePicture = true)
         val vm = viewModel(gateway)
         vm.start()
@@ -46,7 +46,7 @@ class LiveViewViewModelTest {
         advanceUntilIdle()
         vm.toggleRecording()
         advanceUntilIdle()
-        assertEquals(0, gateway.startRecordingCalls)
+        assertEquals(1, gateway.startRecordingCalls)
         gateway.releaseTakePicture()
         advanceUntilIdle()
     }
