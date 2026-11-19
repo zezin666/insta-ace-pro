@@ -14,8 +14,8 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import com.acegallery.R
 import com.acegallery.model.CameraFile
-import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -46,20 +46,35 @@ class WatermarkExporter(private val context: Context) {
         val sourceExif = openSourceExif(source)
         val rotationDegrees = readRotationDegrees(sourceExif)
         val dateTakenMillis = captureTimeMillis(sourceExif)
-        val (jpeg, downscaled) = try {
-            renderJpeg(source, rotationDegrees, options, sampleSize = 1) to false
-        } catch (oom: OutOfMemoryError) {
-            Log.w(TAG, "Full-resolution export ran out of memory; retrying at inSampleSize=2", oom)
-            renderJpeg(source, rotationDegrees, options, sampleSize = 2) to true
+        var sampleSize = 1
+        while (true) {
+            try {
+                val uri = withExportTempFile(
+                    cacheDir = context.cacheDir,
+                    sourcePath = source.absolutePath,
+                    timestampMillis = System.currentTimeMillis(),
+                ) { tempFile ->
+                    renderJpeg(source, rotationDegrees, options, sampleSize, tempFile)
+                    save(
+                        jpegFile = tempFile,
+                        name = file.name.substringBeforeLast('.') + "_WM.jpg",
+                        source = source,
+                        sourceExif = sourceExif,
+                        dateTakenMillis = dateTakenMillis,
+                    )
+                }
+                return WatermarkExportResult(uri, downscaled = sampleSize > 1)
+            } catch (oom: OutOfMemoryError) {
+                val next = nextSampleSize(sampleSize) ?: throw oom
+                Log.w(
+                    TAG,
+                    "Export ran out of memory at inSampleSize=$sampleSize; " +
+                        "retrying at inSampleSize=$next",
+                    oom,
+                )
+                sampleSize = next
+            }
         }
-        val uri = save(
-            bytes = jpeg,
-            name = file.name.substringBeforeLast('.') + "_WM.jpg",
-            source = source,
-            sourceExif = sourceExif,
-            dateTakenMillis = dateTakenMillis,
-        )
-        return WatermarkExportResult(uri, downscaled)
     }
 
     /** Renders a preview at the given (already downscaled) size without writing to MediaStore. */
@@ -83,26 +98,27 @@ class WatermarkExporter(private val context: Context) {
     }
 
     /**
-     * Decodes, rotates, draws, and compresses in one attempt so an [OutOfMemoryError] anywhere in
-     * the pipeline is caught by [exportPhoto] and retried at `inSampleSize = 2`.
+     * Decodes, rotates, draws, and streams JPEG compression into [destination] in one attempt so an
+     * [OutOfMemoryError] anywhere in the pipeline is caught by [exportPhoto] and retried down the
+     * sample-size ladder.
      */
     private fun renderJpeg(
         source: File,
         rotationDegrees: Int,
         options: WatermarkOptions,
         sampleSize: Int,
-    ): ByteArray {
+        destination: File,
+    ) {
         var decoded: Bitmap? = null
         var rendered: Bitmap? = null
         try {
             decoded = decodeMutable(source, sampleSize)
             rendered = rotate(decoded, rotationDegrees)
             drawWatermark(rendered, options.position)
-            return ByteArrayOutputStream().use { out ->
+            FileOutputStream(destination).use { out ->
                 check(rendered.compress(Bitmap.CompressFormat.JPEG, 95, out)) {
                     "导出失败，无法编码 JPEG"
                 }
-                out.toByteArray()
             }
         } finally {
             // `rotate` may return the decoded bitmap itself, so only recycle distinct objects.
@@ -179,7 +195,7 @@ class WatermarkExporter(private val context: Context) {
     }
 
     private fun save(
-        bytes: ByteArray,
+        jpegFile: File,
         name: String,
         source: File,
         sourceExif: ExifInterface,
@@ -197,8 +213,9 @@ class WatermarkExporter(private val context: Context) {
             ?: error("导出失败，无法写入系统相册")
         var published = false
         try {
-            resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                ?: error("导出失败，无法打开输出流")
+            resolver.openOutputStream(uri)?.use { output ->
+                jpegFile.inputStream().use { input -> input.copyTo(output) }
+            } ?: error("导出失败，无法打开输出流")
             copyExif(source, sourceExif, uri)
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
