@@ -7,28 +7,44 @@ import java.security.MessageDigest
 
 class ThumbnailDiskCache(
     private val dir: File,
+    private val codec: ThumbnailCodec,
     private val maxBytes: Long = 128L * 1024 * 1024,
 ) {
 
-    fun get(key: String): Thumbnail? = runCatching {
+    fun get(key: String): Thumbnail? {
         val file = fileFor(key)
-        if (!file.exists()) return@runCatching null
-        DataInputStream(file.inputStream().buffered()).use { input ->
-            val width = input.readInt()
-            val height = input.readInt()
-            val pixels = IntArray(width * height)
-            for (i in pixels.indices) pixels[i] = input.readInt()
-            Thumbnail(width, height, pixels)
+        if (!file.exists()) return null
+        val thumb = runCatching {
+            DataInputStream(file.inputStream().buffered()).use { input ->
+                val magic = ByteArray(MAGIC.size)
+                input.readFully(magic)
+                check(magic.contentEquals(MAGIC)) { "invalid magic" }
+                val width = input.readInt()
+                val height = input.readInt()
+                check(width > 0 && height > 0) { "invalid dimensions" }
+                val decoded = codec.decode(input.readBytes())
+                    ?: error("thumbnail decode failed")
+                check(decoded.width == width && decoded.height == height) {
+                    "thumbnail dimensions mismatch"
+                }
+                decoded
+            }
+        }.getOrNull()
+        if (thumb == null) {
+            file.delete()
         }
-    }.getOrNull()
+        return thumb
+    }
 
     fun put(key: String, thumb: Thumbnail) {
         runCatching {
             dir.mkdirs()
+            val encoded = codec.encode(thumb)
             DataOutputStream(fileFor(key).outputStream().buffered()).use { output ->
+                output.write(MAGIC)
                 output.writeInt(thumb.width)
                 output.writeInt(thumb.height)
-                thumb.argb.forEach { output.writeInt(it) }
+                output.write(encoded)
             }
             trim()
         }
@@ -49,5 +65,9 @@ class ThumbnailDiskCache(
             .digest(key.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return File(dir, "$hash.thumb")
+    }
+
+    private companion object {
+        val MAGIC = byteArrayOf(0x41, 0x43, 0x54, 0x31)
     }
 }

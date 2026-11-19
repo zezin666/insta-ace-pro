@@ -2,6 +2,7 @@ package com.acegallery.di
 
 import android.content.Context
 import com.acegallery.session.CameraSession
+import com.acegallery.thumbnail.BitmapPngCodec
 import com.acegallery.thumbnail.ExifThumbnailSource
 import com.acegallery.thumbnail.HttpThumbnailSource
 import com.acegallery.thumbnail.ProtocolThumbnailSource
@@ -30,6 +31,9 @@ object ThumbnailModule {
             HttpThumbnailSource(session),
             ExifThumbnailSource(session),
         ),
-        diskCache = ThumbnailDiskCache(File(context.cacheDir, "thumbs")),
+        diskCache = ThumbnailDiskCache(
+            dir = File(context.cacheDir, "thumbs"),
+            codec = BitmapPngCodec(),
+        ),
     )
 }

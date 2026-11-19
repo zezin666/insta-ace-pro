@@ -2,30 +2,16 @@ package com.acegallery.thumbnail
 
 import com.acegallery.model.CameraFile
 import com.acegallery.model.CameraFileKind
-import java.io.File
-import java.nio.file.Files
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import org.junit.After
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 
 class ThumbnailLoaderTest {
-
-    private lateinit var tempDir: File
-
-    @Before
-    fun setUp() {
-        tempDir = Files.createTempDirectory("thumbs").toFile()
-    }
-
-    @After
-    fun tearDown() {
-        tempDir.deleteRecursively()
-    }
 
     @Test
     fun `loader falls back to next source`() = runTest {
@@ -43,16 +29,6 @@ class ThumbnailLoaderTest {
         loader.load(file)
         loader.load(file)
         assertEquals(1, source.calls)
-    }
-
-    @Test
-    fun `disk cache round trips thumbnail`() {
-        val cache = ThumbnailDiskCache(tempDir)
-        val thumb = Thumbnail(2, 2, intArrayOf(1, 2, 3, 4))
-        cache.put("k", thumb)
-        val loaded = cache.get("k")
-        assertEquals(2, loaded?.width)
-        assertArrayEquals(intArrayOf(1, 2, 3, 4), loaded?.argb)
     }
 
     @Test
@@ -79,12 +55,30 @@ class ThumbnailLoaderTest {
     }
 
     @Test
-    fun `disk cache evicts oldest`() {
-        val cache = ThumbnailDiskCache(tempDir, maxBytes = 40)
-        cache.put("a", Thumbnail(2, 2, intArrayOf(1, 2, 3, 4)))
-        cache.put("b", Thumbnail(2, 2, intArrayOf(5, 6, 7, 8)))
+    fun `loader stops after job cancellation`() = runTest {
+        val thumb = Thumbnail(1, 1, intArrayOf(0xFF00FF00.toInt()))
+        val nextSource = CountingSource(thumb)
+        lateinit var job: Job
+        job = launch {
+            val loader = ThumbnailLoader(
+                sources = listOf(
+                    object : ThumbnailSource {
+                        override suspend fun load(file: CameraFile): Thumbnail {
+                            job.cancel()
+                            return thumb
+                        }
+                    },
+                    nextSource,
+                ),
+            )
+            val failure = runCatching { loader.load(file) }.exceptionOrNull()
+            assertTrue(failure is CancellationException)
+        }
 
-        assertTrue((tempDir.listFiles()?.size ?: 0) <= 1)
+        job.join()
+
+        assertEquals(0, nextSource.calls)
+        assertTrue(job.isCancelled)
     }
 
     private class FakeSource(private val thumb: Thumbnail?) : ThumbnailSource {

@@ -1,6 +1,8 @@
 package com.acegallery.thumbnail
 
 import com.acegallery.model.CameraFile
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -24,7 +26,10 @@ class ThumbnailLoader(
             return thumb
         }
         for (source in sources) {
-            val loaded = source.load(file) ?: continue
+            currentCoroutineContext().ensureActive()
+            val loaded = source.load(file)
+            currentCoroutineContext().ensureActive()
+            if (loaded == null) continue
             val thumb = loaded.scaledTo(maxDimension)
             diskCache?.put(key, thumb)
             memoryPut(key, thumb)
