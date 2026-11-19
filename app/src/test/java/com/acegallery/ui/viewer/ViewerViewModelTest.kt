@@ -36,7 +36,6 @@ class ViewerViewModelTest {
         override val state: StateFlow<CameraState> = _state
         override val captureMode = MutableStateFlow(CaptureMode.UNKNOWN)
         override val liveStreamParams = MutableStateFlow<LiveStreamParams?>(null)
-        override suspend fun setCaptureMode(mode: CaptureMode) = Unit
         override suspend fun connect(host: String) = Unit
         override fun disconnect() = Unit
         override suspend fun listFiles(): List<CameraFile> = emptyList()

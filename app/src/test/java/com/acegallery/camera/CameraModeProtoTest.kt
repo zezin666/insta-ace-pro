@@ -7,14 +7,6 @@ import org.junit.Test
 
 class CameraModeProtoTest {
     @Test
-    fun `encodes set sync capture mode`() {
-        val message = CameraProto.SetSyncCaptureMode.newBuilder()
-            .setCaptureMode(CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_IMAGE)
-            .build()
-        assertEquals("0801", message.toByteArray().joinToString("") { "%02x".format(it) })
-    }
-
-    @Test
     fun `parses sync capture mode response`() {
         val response = CameraProto.GetSyncCaptureModeResp.parseFrom(bytes("0802"))
         assertEquals(CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_VIDEO, response.captureMode)

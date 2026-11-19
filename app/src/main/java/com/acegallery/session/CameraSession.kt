@@ -2,8 +2,6 @@ package com.acegallery.session
 
 import com.acegallery.camera.CameraCommands
 import com.acegallery.camera.CameraNotification
-import com.acegallery.camera.CameraProtocolException
-import com.acegallery.camera.CameraProtocolTimeoutException
 import com.acegallery.camera.CameraTransport
 import com.acegallery.model.CameraFile
 import com.acegallery.network.CameraFileSource
@@ -20,7 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +43,6 @@ interface CameraGateway : CameraFileSourceProvider {
     fun repository(): CameraFileRepository
     fun transport(): CameraTransport
     fun httpClient(): OkHttpClient
-    suspend fun setCaptureMode(mode: CaptureMode) = Unit
     suspend fun startLiveStream() = Unit
     suspend fun stopLiveStream() = Unit
     suspend fun takePicture() = Unit
@@ -208,35 +204,6 @@ class CameraSession @Inject constructor(
         transport().request(CameraCommands.STOP_CAPTURE, ByteArray(0), timeoutMs = 15_000)
     }
 
-    override suspend fun setCaptureMode(mode: CaptureMode) {
-        if (mode == CaptureMode.UNKNOWN || _captureMode.value == mode) return
-        val protoMode = if (mode == CaptureMode.PHOTO) {
-            CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_IMAGE
-        } else {
-            CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_VIDEO
-        }
-        val request = CameraProto.SetSyncCaptureMode.newBuilder()
-            .setCaptureMode(protoMode)
-            .build()
-        try {
-            transport().request(
-                CameraCommands.SET_SYNC_CAPTURE_MODE,
-                request.toByteArray(),
-                timeoutMs = 5_000,
-                fatalOnTimeout = false,
-            )
-        } catch (error: CameraProtocolException) {
-            throw CameraProtocolException(
-                error.responseCode,
-                "无法切换相机模式（相机返回 ${error.responseCode}）",
-            )
-        } catch (_: CameraProtocolTimeoutException) {
-            throw CameraProtocolTimeoutException("无法切换相机模式（相机无响应）")
-        }
-        _captureMode.value = mode
-        delay(MODE_SETTLE_MS)
-    }
-
     /** Queries command 55; a timeout or parse failure leaves the mode UNKNOWN without killing the connection. */
     private suspend fun queryCaptureMode() {
         val current = transport ?: return
@@ -304,7 +271,6 @@ class CameraSession @Inject constructor(
 
     private companion object {
         const val PORT = 6666
-        const val MODE_SETTLE_MS = 250L
         const val NOT_CONNECTED_MESSAGE =
             "未连接相机 WiFi。请先在系统设置里连接相机的 WiFi。"
     }

@@ -3,7 +3,6 @@ package com.acegallery.session
 import com.acegallery.bytes
 import com.acegallery.camera.CameraCommands
 import com.acegallery.camera.CameraNotification
-import com.acegallery.camera.CameraProtocolException
 import com.acegallery.camera.CameraProtocolTimeoutException
 import com.acegallery.camera.CameraTransport
 import com.acegallery.network.CameraNetworkFinder
@@ -83,22 +82,19 @@ class CameraSessionTest {
     }
 
     @Test
+    fun `mode query updates capture mode`() = runTest {
+        val transport = RecordingTransport(initialMode = CameraProto.SyncCaptureMode.SYNC_MODE_NORMAL_VIDEO)
+        val session = session(FakeFinder(FakeHandle), transport)
+        session.connect()
+        assertTrue(CameraCommands.GET_SYNC_CAPTURE_MODE in transport.commands)
+        assertEquals(CaptureMode.VIDEO, session.captureMode.value)
+    }
+
+    @Test
     fun `mode query timeout keeps session connected`() = runTest {
         val transport = RecordingTransport(failModeQuery = true)
         val session = session(FakeFinder(FakeHandle), transport)
         session.connect()
-        assertTrue(session.state.value is CameraState.Connected)
-        assertEquals(CaptureMode.UNKNOWN, session.captureMode.value)
-    }
-
-    @Test
-    fun `mode switch timeout keeps session connected and mode unchanged`() = runTest {
-        val transport = RecordingTransport(failModeSwitch = true)
-        val session = session(FakeFinder(FakeHandle), transport)
-        session.connect()
-        val error = runCatching { session.setCaptureMode(CaptureMode.PHOTO) }.exceptionOrNull()
-        assertTrue(error is CameraProtocolTimeoutException)
-        assertTrue(error?.message?.contains("无法切换相机模式") == true)
         assertTrue(session.state.value is CameraState.Connected)
         assertEquals(CaptureMode.UNKNOWN, session.captureMode.value)
     }
@@ -180,8 +176,6 @@ class CameraSessionTest {
         private val initialMode: CameraProto.SyncCaptureMode =
             CameraProto.SyncCaptureMode.SYNC_MODE_UNKNOWN,
         private val failModeQuery: Boolean = false,
-        private val failModeSwitch: Boolean = false,
-        private val failModeSwitchWith: Int? = null,
     ) : CameraTransport {
         val commands = mutableListOf<Int>()
         private val _notifications = MutableSharedFlow<CameraNotification>(extraBufferCapacity = 8)
@@ -212,12 +206,6 @@ class CameraSessionTest {
                         .setCaptureMode(initialMode)
                         .build()
                         .toByteArray()
-                }
-
-                CameraCommands.SET_SYNC_CAPTURE_MODE -> {
-                    failModeSwitchWith?.let { throw CameraProtocolException(it) }
-                    if (failModeSwitch) throw CameraProtocolTimeoutException("mode switch timed out")
-                    ByteArray(0)
                 }
 
                 CameraCommands.GET_FILE_LIST -> CameraProto.GetFileListResp.newBuilder()

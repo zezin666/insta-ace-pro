@@ -74,6 +74,21 @@ class DownloadManagerTest {
     }
 
     @Test
+    fun `retry logs a warning with AceDownload tag`() = runTest {
+        val source = PartialFailSource()
+        val logger = RecordingLogger()
+        val manager = manager(FakeProvider(source), FakeWriter(), plenty, logger)
+
+        manager.enqueue(listOf(fileA))
+        advanceUntilIdle()
+
+        assertEquals(2, source.attempts)
+        assertEquals(1, logger.warnings.size)
+        assertEquals("AceDownload", logger.warnings.single().tag)
+        assertTrue(logger.warnings.single().message.contains("attempt 1 failed"))
+    }
+
+    @Test
     fun `retry fetches a fresh source each attempt`() = runTest {
         val source = FakeFileSource()
         val provider = FakeProvider(source, failFirst = true)
@@ -137,13 +152,25 @@ class DownloadManagerTest {
         provider: CameraFileSourceProvider,
         writer: MediaStoreWriter,
         freeSpace: FreeSpaceChecker,
+        logger: DownloadLogger = DownloadLogger { _, _, _ -> },
     ): DownloadManager = DownloadManager(
         sourceProvider = provider,
         writer = writer,
         tempDir = tempDir,
         scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler)),
         freeSpace = freeSpace,
+        logger = logger,
     )
+
+    private class RecordingLogger : DownloadLogger {
+        val warnings = mutableListOf<Warning>()
+
+        override fun warn(tag: String, message: String, error: Throwable) {
+            warnings += Warning(tag, message, error)
+        }
+    }
+
+    private data class Warning(val tag: String, val message: String, val error: Throwable)
 
     private class FakeProvider(
         private val source: CameraFileSource,

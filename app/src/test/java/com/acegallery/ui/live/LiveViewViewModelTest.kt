@@ -130,7 +130,6 @@ class LiveViewViewModelTest {
         override fun transport(): CameraTransport = error("not used")
         override fun httpClient(): OkHttpClient = error("not used")
         override suspend fun get(): CameraFileSource = error("not used")
-        override suspend fun setCaptureMode(mode: CaptureMode) = Unit
 
         override suspend fun takePicture() {
             takePictureCalls++

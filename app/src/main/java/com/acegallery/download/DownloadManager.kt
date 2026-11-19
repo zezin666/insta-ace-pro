@@ -40,6 +40,7 @@ class DownloadManager(
     private val tempDir: File,
     private val scope: CoroutineScope,
     private val freeSpace: FreeSpaceChecker,
+    private val logger: DownloadLogger = DownloadLogger { _, _, _ -> },
     private val retryCount: Int = 7,
 ) : DownloadQueue {
 
@@ -134,7 +135,7 @@ class DownloadManager(
                 return
             } catch (exc: Exception) {
                 runCatching {
-                    android.util.Log.w(
+                    logger.warn(
                         "AceDownload",
                         "attempt ${attempt + 1} failed for ${file.path}",
                         exc,

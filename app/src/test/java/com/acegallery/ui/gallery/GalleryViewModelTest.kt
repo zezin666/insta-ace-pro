@@ -92,8 +92,6 @@ class GalleryViewModelTest {
         var lastHost: String? = null
             private set
 
-        override suspend fun setCaptureMode(mode: CaptureMode) = Unit
-
         override suspend fun connect(host: String) {
             lastHost = host
             _state.value = CameraState.Connected(host)
