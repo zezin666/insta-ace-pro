@@ -11,28 +11,39 @@ import com.acegallery.session.CaptureMode
 import com.acegallery.session.LiveStreamParams
 import com.acegallery.settings.CameraHostProvider
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LiveViewViewModelTest {
 
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule()
+    private val viewModels = mutableListOf<LiveViewViewModel>()
+
+    @After
+    fun stopViewModels() {
+        viewModels.forEach { it.stop() }
+        runCurrent()
+    }
 
     @Test
     fun `photo is sent directly while recording`() = runTest {
         val gateway = FakeGateway()
         val vm = viewModel(gateway)
         vm.start()
-        advanceUntilIdle()
+        runCurrent()
         vm.toggleRecording()
-        advanceUntilIdle()
+        runCurrent()
         vm.takePhoto()
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(1, gateway.takePictureCalls)
     }
 
@@ -41,14 +52,14 @@ class LiveViewViewModelTest {
         val gateway = FakeGateway(blockTakePicture = true)
         val vm = viewModel(gateway)
         vm.start()
-        advanceUntilIdle()
+        runCurrent()
         vm.takePhoto()
-        advanceUntilIdle()
+        runCurrent()
         vm.toggleRecording()
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(1, gateway.startRecordingCalls)
         gateway.releaseTakePicture()
-        advanceUntilIdle()
+        runCurrent()
     }
 
     @Test
@@ -57,7 +68,7 @@ class LiveViewViewModelTest {
         val vm = viewModel(gateway)
         gateway.captureMode.value = CaptureMode.VIDEO
         gateway.liveStreamParams.value = LiveStreamParams(1920, 1080, 30)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(CaptureMode.VIDEO, vm.state.value.captureMode)
         assertEquals(1920, vm.state.value.liveParams?.width)
     }
@@ -67,11 +78,36 @@ class LiveViewViewModelTest {
         val gateway = FakeGateway()
         val vm = viewModel(gateway)
         gateway.liveStreamParams.value = LiveStreamParams(1920, 1080, 30)
-        advanceUntilIdle()
+        runCurrent()
         vm.onVideoSize(1280, 720)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(1280, vm.state.value.decodedParams?.width)
         assertEquals(720, vm.state.value.decodedParams?.height)
+    }
+
+    @Test
+    fun `watchdog recovers once then exits after the two second grace period`() = runTest {
+        val clock = FakeClock(10_000L)
+        val gateway = FakeGateway()
+        val vm = viewModel(gateway, clock)
+
+        vm.start()
+        runCurrent()
+        assertEquals(1, gateway.startLiveStreamCalls)
+        assertTrue(vm.state.value.streaming)
+
+        advanceClockAndScheduler(clock, 1_000L)
+        assertEquals(2, gateway.startLiveStreamCalls)
+        assertEquals("画面中断，正在恢复…", vm.state.value.message)
+
+        advanceClockAndScheduler(clock, 1_500L)
+        assertEquals("画面中断，正在恢复…", vm.state.value.message)
+        assertEquals(2, gateway.startLiveStreamCalls)
+
+        advanceClockAndScheduler(clock, 500L)
+        assertEquals("画面中断，请退出重进", vm.state.value.message)
+        assertEquals(2, gateway.startLiveStreamCalls)
+        vm.stop()
     }
 
     @Test
@@ -79,19 +115,23 @@ class LiveViewViewModelTest {
         val gateway = FakeGateway()
         val vm = viewModel(gateway)
         vm.start()
-        advanceUntilIdle()
+        runCurrent()
         vm.stop()
         clear(vm)
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(1, gateway.stopRecordingCalls)
         assertEquals(1, gateway.stopLiveStreamCalls)
     }
 
-    private fun viewModel(gateway: FakeGateway): LiveViewViewModel = LiveViewViewModel(
+    private fun viewModel(
+        gateway: FakeGateway,
+        clock: Clock = FakeClock(advancePerRead = 1_000L),
+    ): LiveViewViewModel = LiveViewViewModel(
         session = gateway,
         hostProvider = CameraHostProvider { "192.168.42.1" },
         ioDispatcher = mainDispatcherRule.dispatcher,
-    )
+        clock = clock,
+    ).also { viewModels += it }
 
     private fun clear(vm: LiveViewViewModel) {
         LiveViewViewModel::class.java
@@ -100,8 +140,30 @@ class LiveViewViewModelTest {
             .invoke(vm)
     }
 
-    private fun advanceUntilIdle() {
-        mainDispatcherRule.dispatcher.scheduler.advanceUntilIdle()
+    private fun runCurrent() {
+        mainDispatcherRule.dispatcher.scheduler.runCurrent()
+    }
+
+    private fun advanceClockAndScheduler(clock: FakeClock, durationMs: Long) {
+        var remainingMs = durationMs
+        while (remainingMs > 0) {
+            val stepMs = minOf(remainingMs, WATCHDOG_TEST_STEP_MS)
+            clock.advance(stepMs)
+            mainDispatcherRule.dispatcher.scheduler.advanceTimeBy(stepMs)
+            runCurrent()
+            remainingMs -= stepMs
+        }
+    }
+
+    private class FakeClock(
+        private var now: Long = 0L,
+        private val advancePerRead: Long = 0L,
+    ) : Clock {
+        override fun nowMs(): Long = now.also { now += advancePerRead }
+
+        fun advance(durationMs: Long) {
+            now += durationMs
+        }
     }
 
     private class FakeGateway(
@@ -117,6 +179,8 @@ class LiveViewViewModelTest {
         var stopRecordingCalls = 0
             private set
         var stopLiveStreamCalls = 0
+            private set
+        var startLiveStreamCalls = 0
             private set
         private val takePictureGate = CompletableDeferred<Unit>()
 
@@ -145,6 +209,10 @@ class LiveViewViewModelTest {
             stopRecordingCalls++
         }
 
+        override suspend fun startLiveStream() {
+            startLiveStreamCalls++
+        }
+
         override suspend fun stopLiveStream() {
             stopLiveStreamCalls++
         }
@@ -152,5 +220,9 @@ class LiveViewViewModelTest {
         fun releaseTakePicture() {
             takePictureGate.complete(Unit)
         }
+    }
+
+    private companion object {
+        const val WATCHDOG_TEST_STEP_MS = 250L
     }
 }

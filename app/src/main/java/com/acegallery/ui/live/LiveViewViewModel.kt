@@ -29,6 +29,7 @@ class LiveViewViewModel @Inject constructor(
     private val session: CameraGateway,
     private val hostProvider: CameraHostProvider,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val clock: Clock,
 ) : ViewModel() {
 
     data class UiState(
@@ -208,7 +209,7 @@ class LiveViewViewModel @Inject constructor(
         }
     }
 
-    private fun nowMs(): Long = System.currentTimeMillis()
+    private fun nowMs(): Long = clock.nowMs()
 
     private companion object {
         const val WATCHDOG_TICK_MS = 250L

@@ -96,19 +96,28 @@ fun LiveViewScreen(
         onDispose { viewModel.stop() }
     }
 
-    LaunchedEffect(surface) {
-        val target = surface ?: return@LaunchedEffect
-        val decoder = LiveViewDecoder(target, onVideoSize = viewModel::onVideoSize)
+    val decoder = remember(surface) {
+        surface?.let { LiveViewDecoder(it, onVideoSize = viewModel::onVideoSize) }
+    }
+    val liveFps = state.liveParams?.fps
+    LaunchedEffect(decoder, liveFps) {
+        if (liveFps != null && liveFps > 0) {
+            decoder?.setFps(liveFps)
+        }
+    }
+
+    LaunchedEffect(decoder) {
+        val activeDecoder = decoder ?: return@LaunchedEffect
         try {
             coroutineScope {
                 val collectJob = launch(Dispatchers.IO) {
-                    viewModel.packets.collect { packet -> decoder.feed(packet) }
+                    viewModel.packets.collect { packet -> activeDecoder.feed(packet) }
                 }
                 viewModel.start()
                 collectJob.join()
             }
         } finally {
-            decoder.release()
+            activeDecoder.release()
         }
     }
 
