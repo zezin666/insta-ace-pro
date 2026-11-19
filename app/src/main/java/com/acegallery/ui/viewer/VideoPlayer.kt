@@ -26,7 +26,7 @@ fun VideoPlayer(
     val host = (session.state.value as? CameraState.Connected)?.host
         ?: CameraGateway.DEFAULT_HOST
     val url = "http://$host${file.path}"
-    val client = remember(session.state.value) {
+    val client = remember(url) {
         runCatching { session.httpClient() }.getOrNull()
     }
 
@@ -35,7 +35,7 @@ fun VideoPlayer(
         return
     }
 
-    val player = remember(file.path, url) {
+    val player = remember(url) {
         val dataSourceFactory = OkHttpDataSource.Factory(client)
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
